@@ -1,0 +1,18 @@
+# Ambiente virtual
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Gerado em tempo de execucao: logs por run e historico de celulas estragadas
+logs/
+
+# Editores
+.vscode/
+.idea/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -61,6 +61,7 @@ MIN_PRICE = 1                    # nenhum item pode sair de graca
 MARKET_DAILY_BUDGET = 200        # moedas que a loja tem por dia para pagar colheita
 
 SUPPLY_DEMAND_START_DAY = 11     # oferta/demanda so vale depois do dia 10
+SUPPLY_DEMAND_DAILY_UNITS = 7    # a partir dessa quantidade no MESMO dia ja satura
 SUPPLY_DEMAND_DROP = 1           # moedas a menos por unidade vendida
 SUPPLY_DEMAND_RECOVERY = 1       # moedas de volta por dia sem vender
 

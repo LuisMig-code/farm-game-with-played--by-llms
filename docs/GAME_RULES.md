@@ -227,16 +227,23 @@ no dia anterior. O quadro de preços mostra o valor corrente logo abaixo do tít
 
 ### Oferta e demanda
 
-São **duas condições somadas** para o preço de uma cultura começar a cair:
+Para o preço de uma cultura começar a cair é preciso estar no **dia 11 ou depois** — antes disso
+nada é sequer contado, para dar tempo de acumular patrimônio — **e** disparar um destes dois
+gatilhos, qualquer um deles:
 
-1. Estar no **dia 11 ou depois** — antes disso nada é sequer contado, para dar tempo de acumular
-   patrimônio. Ninguém leva uma conta acumulada de uma vez quando o sistema liga.
-2. Ter vendido aquela cultura **ontem e também hoje**. A quantidade não importa: **1 unidade em
-   cada um dos dois dias já basta**. O que o mercado pune é a repetição, não o volume.
+1. **Repetição**: ter vendido aquela cultura **ontem e também hoje**. A quantidade não importa,
+   1 unidade em cada um dos dois dias já basta.
+2. **Volume**: ter vendido **7 ou mais unidades** dela **hoje**, mesmo sem ter vendido ontem. Sem
+   isso dava para chegar na loja com 40 melancias, despejar tudo num dia só e não sofrer nada.
 
-Como nada é contado antes do dia 11, o dia 11 nunca tem um "ontem" válido — na prática a primeira
-queda possível é no **dia 12**. A partir do gatilho, cada unidade vendida derruba 1 moeda, até o
-piso do **preço da própria semente**: vender continua empatando com o custo, mas para de dar lucro.
+A contagem começa **quando o gatilho dispara**, não retroativamente: num despejo isolado as 6
+primeiras saem pelo preço cheio e a **7ª** é a primeira a derrubar 1 moeda. Dali em diante cada
+unidade derruba mais 1, até o piso do **preço da própria semente**: vender continua empatando com o
+custo, mas para de dar lucro.
+
+Pelo gatilho da repetição, como nada é contado antes do dia 11, o dia 11 nunca tem um "ontem"
+válido e a primeira queda por repetição só pode acontecer no **dia 12**. Pelo gatilho de volume ela
+pode acontecer já no dia 11.
 
 Cada dia **sem vender** aquela cultura devolve 1 moeda ao preço, até voltar ao valor original, e
 um único dia parado já quebra a sequência — o "ontem" zera e é preciso começar de novo. Vender dia

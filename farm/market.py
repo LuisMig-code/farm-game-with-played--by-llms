@@ -86,9 +86,10 @@ class Market:
     def register_sale(self, crop: str, day: int) -> None:
         """Registra a venda: consome caixa do dia e pode saturar a cultura.
 
-        O caixa e cobrado sempre; a saturacao tem duas condicoes somadas. Antes
-        do dia de largada nada e sequer contado: guardar em silencio faria o
-        jogador levar a conta inteira de uma vez quando o sistema ligasse.
+        O caixa e cobrado sempre. A saturacao depende da trava de dia mais um
+        dos gatilhos de `saturates`. Antes do dia de largada nada e sequer
+        contado: guardar em silencio faria o jogador levar a conta inteira de
+        uma vez quando o sistema ligasse.
         """
         self._paid_today += self.sell_price(crop, day)
 
@@ -96,7 +97,7 @@ class Market:
             return
 
         self._sold_today[crop] += 1
-        if not self.sold_two_days_running(crop):
+        if not self.saturates(crop):
             return
 
         # O teto e a distancia ate o piso: sem isso, um despejo de 30 melancias
@@ -104,6 +105,16 @@ class Market:
         teto = CROPS[crop].sell_price - CROPS[crop].seed_price
         atual = self.saturation.get(crop, 0) + settings.SUPPLY_DEMAND_DROP
         self.saturation[crop] = min(teto, atual)
+
+    def saturates(self, crop: str) -> bool:
+        """Um dos dois gatilhos basta: despejo num dia so, ou repeticao.
+
+        A contagem comeca quando o gatilho dispara, nao retroativamente: numa
+        venda isolada as 6 primeiras saem pelo preco cheio e a 7a e a primeira
+        a derrubar.
+        """
+        return (self._sold_today[crop] >= settings.SUPPLY_DEMAND_DAILY_UNITS
+                or self.sold_two_days_running(crop))
 
     def sold_two_days_running(self, crop: str) -> bool:
         """Vendeu essa cultura ontem E hoje, em qualquer quantidade.

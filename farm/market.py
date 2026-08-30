@@ -5,7 +5,7 @@ import random
 from collections import Counter
 
 from farm import settings
-from farm.crops import BUY_PRICES, CROPS
+from farm.crops import BUY_PRICES, CROPS, STOCK_RANGES
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,20 @@ class Market:
         self._sold_yesterday: Counter[str] = Counter()
         self._paid_today = 0                   # moedas que a loja pagou hoje
         self._spent_today = 0                  # moedas que o jogador gastou hoje
+        self.stock: dict[str, int] = {}
+        self.roll_stock()                      # antes da promocao: ela depende dele
         self.roll_promotions()
+
+    # --------------------------------------------------------------- estoque
+
+    def roll_stock(self) -> dict[str, int]:
+        """Estoque do dia, uniforme dentro da faixa de cada item. Nao acumula."""
+        self.stock = {item: self.rng.randint(*faixa)
+                      for item, faixa in STOCK_RANGES.items()}
+        return dict(self.stock)
+
+    def stock_left(self, item: str) -> int:
+        return self.stock.get(item, 0)
 
     # ----------------------------------------------------------- caixa do dia
 
@@ -41,7 +54,8 @@ class Market:
     def can_sell(self, crop: str, day: int) -> bool:
         return self.sell_price(crop, day) <= self.budget_left
 
-    def register_purchase(self, price: int) -> None:
+    def register_purchase(self, item: str, price: int) -> None:
+        self.stock[item] = max(0, self.stock_left(item) - 1)
         self._spent_today += price
 
     # ---------------------------------------------------------------- precos
@@ -109,6 +123,7 @@ class Market:
         self._sold_yesterday = self._sold_today
         self._sold_today = Counter()
         self._paid_today = self._spent_today = 0   # caixa nao acumula entre dias
+        self.roll_stock()
         self.roll_promotions()
 
     def _recover(self) -> None:
@@ -139,14 +154,23 @@ class Market:
         return dict(self.promos)
 
     def _draw_items(self) -> list[str]:
-        chance = self.rng.random()
-        if chance < settings.PROMO_ONE_ITEM_CHANCE:
-            quantidade = 1
-        elif chance < settings.PROMO_ONE_ITEM_CHANCE + settings.PROMO_TWO_ITEMS_CHANCE:
-            quantidade = 2
-        else:
+        """Quantos e quais itens entram em promocao hoje.
+
+        So concorrem itens com estoque: nao adianta anunciar desconto em semente
+        que a loja nao tem para vender. Entre os disponiveis a escolha e
+        uniforme, sem peso.
+        """
+        disponiveis = [item for item in BUY_PRICES if self.stock_left(item) > 0]
+        if not disponiveis:
             return []
-        return self.rng.sample(list(BUY_PRICES), quantidade)
+
+        chance = self.rng.random()
+        acumulado = 0.0
+        for quantidade, peso in settings.PROMO_ITEM_CHANCES:
+            acumulado += peso
+            if chance < acumulado:
+                return self.rng.sample(disponiveis, min(quantidade, len(disponiveis)))
+        return []
 
     def _draw_discount(self, base_price: int) -> int:
         if base_price < settings.PROMO_SMALL_PRICE:

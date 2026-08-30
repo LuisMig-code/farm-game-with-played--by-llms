@@ -88,10 +88,24 @@ class Hud:
                 icon.set_alpha(90)
             surface.blit(icon, (x, settings.SLOTS_TOP))
 
-            color = settings.HUD_COLOR if count else settings.HUD_DIM_COLOR
+            cheio = inventory.is_full(item)
+            if cheio:
+                color = settings.HUD_FULL_COLOR
+            elif count:
+                color = settings.HUD_COLOR
+            else:
+                color = settings.HUD_DIM_COLOR
             _shadowed(surface, self.fonts.normal, f"x{count}",
                       (x + icon.get_width() + 6,
                        settings.SLOTS_TOP + settings.SLOT_ICON_HEIGHT // 2 - 16), color)
+
+            # O teto vai sob o icone, onde ha a largura do slot inteiro: ao lado
+            # da contagem so cabem os poucos pixels que sobram do icone.
+            limite = inventory.limit_for(item)
+            if limite is not None:
+                _shadowed(surface, self.fonts.small, f"max: {limite}",
+                          (x, settings.SLOTS_TOP + settings.SLOT_ICON_HEIGHT + 4),
+                          settings.HUD_FULL_COLOR if cheio else settings.HUD_DIM_COLOR)
 
     # ------------------------------------------------------- quadro de precos
 

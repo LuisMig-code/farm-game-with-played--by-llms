@@ -4,7 +4,8 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 from farm import settings
-from farm.crops import COIN, CROPS, FERTILIZER, INVENTORY_ORDER, seed_key
+from farm.crops import (COIN, CROPS, FERTILIZER, INVENTORY_ORDER, ITEM_LIMITS,
+                        seed_key)
 
 
 class Inventory:
@@ -19,8 +20,21 @@ class Inventory:
     def has(self, item: str, amount: int = 1) -> bool:
         return self.count(item) >= amount
 
+    def limit_for(self, item: str) -> int | None:
+        """Teto desse item, ou None quando ele nao tem limite."""
+        return ITEM_LIMITS.get(item)
+
+    def room_for(self, item: str) -> int:
+        """Quantas unidades ainda cabem. Sem limite, devolve um numero grande."""
+        limite = self.limit_for(item)
+        return 10 ** 9 if limite is None else max(0, limite - self.count(item))
+
+    def is_full(self, item: str) -> bool:
+        return self.room_for(item) == 0
+
     def add(self, item: str, amount: int = 1) -> None:
-        self._counts[item] = self.count(item) + amount
+        """Nunca passa do teto: o limite e invariante do inventario."""
+        self._counts[item] = self.count(item) + min(amount, self.room_for(item))
 
     def take(self, item: str, amount: int = 1) -> bool:
         """Tira do inventario. False (e nada muda) se nao houver o suficiente."""

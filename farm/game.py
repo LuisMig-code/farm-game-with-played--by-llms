@@ -308,9 +308,20 @@ class Game:
         moedas = self.inventory.count(COIN)
         options = []
         for item in BUY_PRICES:
+            estoque = self.market.stock_left(item)
+            if not estoque:
+                options.append(Option(f"{ITEM_LABELS[item]}   esgotado hoje",
+                                      icon=item, enabled=False))
+                continue
+            if self.inventory.is_full(item):
+                options.append(Option(f"{ITEM_LABELS[item]}   voce ja carrega "
+                                      f"{self.inventory.limit_for(item)}, o maximo",
+                                      icon=item, enabled=False))
+                continue
             preco = self.market.buy_price(item)
             promo = "  (promo!)" if self.market.is_promo(item) else ""
-            options.append(Option(f"{ITEM_LABELS[item]}   {preco} moedas{promo}",
+            options.append(Option(f"{ITEM_LABELS[item]}   {preco} moedas{promo}   "
+                                  f"{estoque} no estoque",
                                   value=item, icon=item, enabled=moedas >= preco))
         return Menu(BUY_MENU, self._wallet("Comprar"), options, cell)
 
@@ -368,9 +379,11 @@ class Game:
 
     def _buy(self, item: str, cell: Cell) -> None:
         preco = self.market.buy_price(item)
+        if not self.market.stock_left(item) or self.inventory.is_full(item):
+            return
         if not self.inventory.take(COIN, preco):
             return
-        self.market.register_purchase(preco)   # comprar devolve caixa ao mercado
+        self.market.register_purchase(item, preco)   # tambem devolve caixa ao mercado
         self.inventory.add(item)
         self.stats.bought[item] += 1
         logger.info("comprou %s por %d moedas", item, preco)

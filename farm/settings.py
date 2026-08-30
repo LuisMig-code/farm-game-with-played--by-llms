@@ -36,7 +36,7 @@ ACTION_ANIM_FPS = 8
 ACTION_FRAMES = 4
 
 # Estamina
-STAMINA_MAX = 150
+STAMINA_MAX = 160
 STAMINA_WALK = 1        # cobrado ao concluir cada celula
 STAMINA_PLANT = 2
 STAMINA_HARVEST = 1
@@ -49,9 +49,11 @@ STARTING_SEEDS = 1      # de cada tipo
 STARTING_FERTILIZER = 2
 
 # Mercado
-PROMO_ONE_ITEM_CHANCE = 0.3     # so 1 item em promocao
-PROMO_TWO_ITEMS_CHANCE = 0.15    # exatamente 2 itens
-PROMO_DISCOUNTS = ((1, 0.60), (2, 0.20), (3, 0.15), (5, 0.05))
+# Quantos itens entram em promocao no dia. Os casos sao mutuamente exclusivos
+# e o que sobra (25%) e dia sem promocao.
+PROMO_ITEM_CHANCES = ((1, 0.40), (2, 0.25), (3, 0.10))
+# Peso do desconto, sorteado uma vez PARA CADA item promovido.
+PROMO_DISCOUNTS = ((1, 0.50), (2, 0.30), (3, 0.15), (5, 0.05))
 PROMO_SMALL_PRICE = 3            # abaixo disso o desconto e sempre o menor
 MIN_PRICE = 1                    # nenhum item pode sair de graca
 
@@ -123,6 +125,7 @@ GRID_HOVER_BORDER = (255, 240, 150, 200)
 HUD_COLOR = (255, 255, 255)
 HUD_SHADOW = (0, 0, 0)
 HUD_DIM_COLOR = (150, 150, 150)
+HUD_FULL_COLOR = (255, 205, 90)   # item no teto do inventario
 HUD_FONT_SIZE = max(12, round(SCREEN_SIZE[1] * 0.026))
 HUD_MARGIN = round(SCREEN_SIZE[1] * 0.016)
 

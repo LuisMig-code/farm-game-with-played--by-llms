@@ -13,7 +13,7 @@ dormir em casa recupera. Chegar a zero encerra a partida.
 | Remover planta estragada | 2 |
 | Usar fertilizante | 2 |
 
-- O jogador começa cada dia com **150** de estamina (`STAMINA_MAX`).
+- O jogador começa cada dia com **160** de estamina (`STAMINA_MAX`).
 - A célula só é cobrada quando o passo **termina**: esbarrar numa parede não custa nada.
 - Plantar e colher são cobrados no fim da animação, junto com o efeito.
 - **Chegar a 0 é derrota.** A partida congela e mostra o resumo da run.
@@ -38,6 +38,11 @@ Mostrado na faixa inferior, com os 12 itens sempre visíveis (os zerados ficam e
 - Fertilizante e moeda
 
 No começo da partida: **1 semente de cada tipo**, **2 fertilizantes**, 0 vegetais, 0 moedas.
+
+O jogador carrega no máximo **20 sementes de cada tipo** e **9 fertilizantes**. Vegetais colhidos
+e moedas não têm teto. Cada slot do painel mostra o teto embaixo do ícone (`max: 20`, `max: 9`);
+vegetais e moedas não têm essa linha. Chegando no limite, a contagem e o `max:` ficam **dourados**
+e a linha no menu da loja vira `você já carrega 20, o máximo`, desabilitada.
 
 ## Plantar, fertilizar e colher
 
@@ -173,14 +178,37 @@ O fertilizante custa **21** e não é vendável.
 Todo dia, ao dormir (e no começo da run, para o dia 1), a loja sorteia promoções **apenas nos
 itens de compra** — as 5 sementes e o fertilizante. São três sorteios encadeados:
 
-1. **Quantos itens**, em casos mutuamente exclusivos: **1 item com 20%**, **2 itens com 10%**,
-   e **nenhum com 70%** — quase um dia em cada três tem promoção.
-2. **Quais itens** — uniforme, sem peso nenhum: toda semente e o fertilizante têm a mesma
-   chance, e no caso de 2 eles saem distintos.
-3. **O desconto** de cada um, e só aqui existe peso: 1 moeda (60%), 2 (20%), 3 (15%), 5 (5%).
+1. **Quantos itens**, em casos mutuamente exclusivos: **1 item com 40%**, **2 itens com 25%**,
+   **3 itens com 10%** e **nenhum com 25%** — promoção em três de cada quatro dias.
+2. **Quais itens**, sorteados **só entre os que têm estoque naquele dia** — não se anuncia
+   desconto em semente que a loja não tem. Entre os disponíveis a escolha é uniforme, sem peso
+   nenhum, e eles saem distintos.
+3. **O desconto**, sorteado **uma vez para cada item** e não uma vez para o dia: com dois itens em
+   promoção, um pode sair com 1 moeda de desconto e o outro com 3. Aqui, e só aqui, existe peso:
+   1 moeda (50%), 2 (30%), 3 (15%), 5 (5%).
 
 Item com preço abaixo de 3 — só a semente de cenoura, que custa 2 — recebe sempre o menor
 desconto. E o desconto nunca leva o preço abaixo de 1: **nada sai de graça**.
+
+### Estoque do dia
+
+A loja não tem oferta infinita: todo dia ela sorteia quanto tem de cada item, uniformemente
+dentro da faixa abaixo. O estoque baixa a cada compra e **não acumula** — dormir sorteia tudo de
+novo, sobrando ou não.
+
+| Item | Estoque do dia |
+| --- | --- |
+| Semente de cenoura | 1 a 30 |
+| Semente de batata | 1 a 35 |
+| Semente de beterraba | 0 a 25 |
+| Semente de trigo | 0 a 25 |
+| Semente de melancia | 0 a 15 |
+| Fertilizante | 1 a 6 |
+
+Beterraba, trigo e melancia podem simplesmente **não estar à venda** num dia. O número aparece no
+menu de compra (`Semente de Batata   4 moedas   12 no estoque`), e item zerado vira
+`esgotado hoje`, desabilitado. O quadro de preços continua só com preços — os seis números de
+estoque não caberiam nas células sem virar sopa.
 
 ### Caixa diário da loja
 

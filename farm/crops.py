@@ -9,6 +9,9 @@ PROPS_DIR = "props"
 FERTILIZER = "fertilizante"
 COIN = "moeda"
 FERTILIZER_PRICE = 21
+FERTILIZER_STOCK = (1, 6)     # faixa do estoque diario da loja
+FERTILIZER_LIMIT = 9          # quanto o jogador consegue carregar
+SEED_LIMIT = 20               # de cada tipo de semente
 
 SEED_PREFIX = "semente "
 
@@ -25,6 +28,7 @@ class Crop:
     fert_shelf_bonus: int   # dias a mais de validade, se fertilizada
     sell_price: int     # o que a loja paga pelo vegetal
     seed_price: int     # o que a loja cobra pela semente
+    stock_range: tuple[int, int]   # sementes que a loja tem por dia (min, max)
 
     @property
     def seed_icon(self) -> str:
@@ -43,16 +47,16 @@ class Crop:
 CROPS: dict[str, Crop] = {
     crop.key: crop
     for crop in (
-        Crop("batata", "Batata", grow_days=3, shelf_days=3,
-             fert_grow_cut=2, fert_shelf_bonus=2, sell_price=6, seed_price=4),
-        Crop("cenoura", "Cenoura", grow_days=2, shelf_days=3,
-             fert_grow_cut=1, fert_shelf_bonus=2, sell_price=3, seed_price=2),
-        Crop("beterraba", "Beterraba", grow_days=5, shelf_days=3,
-             fert_grow_cut=2, fert_shelf_bonus=4, sell_price=9, seed_price=6),
-        Crop("trigo", "Trigo", grow_days=7, shelf_days=4,
-             fert_grow_cut=2, fert_shelf_bonus=4, sell_price=12, seed_price=7),
-        Crop("melancia", "Melancia", grow_days=9, shelf_days=4,
-             fert_grow_cut=3, fert_shelf_bonus=4, sell_price=18, seed_price=11),
+        Crop("batata", "Batata", grow_days=3, shelf_days=3, fert_grow_cut=2,
+             fert_shelf_bonus=2, sell_price=6, seed_price=4, stock_range=(1, 35)),
+        Crop("cenoura", "Cenoura", grow_days=2, shelf_days=3, fert_grow_cut=1,
+             fert_shelf_bonus=2, sell_price=3, seed_price=2, stock_range=(1, 30)),
+        Crop("beterraba", "Beterraba", grow_days=5, shelf_days=3, fert_grow_cut=2,
+             fert_shelf_bonus=4, sell_price=9, seed_price=6, stock_range=(0, 25)),
+        Crop("trigo", "Trigo", grow_days=7, shelf_days=4, fert_grow_cut=2,
+             fert_shelf_bonus=4, sell_price=12, seed_price=7, stock_range=(0, 25)),
+        Crop("melancia", "Melancia", grow_days=9, shelf_days=4, fert_grow_cut=3,
+             fert_shelf_bonus=4, sell_price=18, seed_price=11, stock_range=(0, 15)),
     )
 }
 
@@ -72,6 +76,18 @@ INVENTORY_ORDER: tuple[str, ...] = (
     FERTILIZER,
     COIN,
 )
+
+# Faixa do estoque diario, na mesma ordem do quadro de precos.
+STOCK_RANGES: dict[str, tuple[int, int]] = {
+    **{seed_key(k): c.stock_range for k, c in CROPS.items()},
+    FERTILIZER: FERTILIZER_STOCK,
+}
+
+# Teto do inventario. Vegetais e moedas nao tem limite: nao aparecem aqui.
+ITEM_LIMITS: dict[str, int] = {
+    **{seed_key(k): SEED_LIMIT for k in CROPS},
+    FERTILIZER: FERTILIZER_LIMIT,
+}
 
 ITEM_ICONS: dict[str, str] = {
     **{seed_key(k): c.seed_icon for k, c in CROPS.items()},

@@ -17,7 +17,7 @@ SPRITE_SIZE = (159, 239)
 
 IDLE = "idle"
 DIRECTIONS = ("down", "up", "left", "right")
-ACTIONS = ("planting", "harvest")   # 4 quadros cada, todos de frente
+ACTIONS = ("planting", "harvest", "fertilizing")   # 4 quadros cada, de frente
 FACING_BY_STEP = {(1, 0): "right", (-1, 0): "left", (0, 1): "down", (0, -1): "up"}
 
 
@@ -44,6 +44,7 @@ class Player:
         self.stamina = self.max_stamina
         self.action: str | None = None
         self._action_time = 0.0
+        self._idle_time = 0.0
         self.on_step = on_step          # avisado a cada celula concluida
         self._step_origin = start_cell
 
@@ -59,7 +60,7 @@ class Player:
         factor = settings.PLAYER_HEIGHT / SPRITE_SIZE[1]
         folder = settings.CHARACTER_DIR
 
-        sources = {IDLE: [f"{folder}/stay 1.png"]}
+        sources = {IDLE: [f"{folder}/stay {i}.png" for i in range(1, 5)]}
         for direction in DIRECTIONS:
             sources[f"run_{direction}"] = [
                 f"{folder}/run {direction} {i}.png" for i in range(1, 5)
@@ -134,7 +135,14 @@ class Player:
             budget = self._advance(budget)
 
         self.moving = self._target is not None
-        self._anim_time = self._anim_time + dt if self.moving else 0.0
+        # Cada estado tem seu relogio: zerar o da corrida faz o passo comecar
+        # sempre no mesmo quadro, e o de parado segue correndo por baixo.
+        if self.moving:
+            self._anim_time += dt
+            self._idle_time = 0.0
+        else:
+            self._anim_time = 0.0
+            self._idle_time += dt
 
     def _start_step(self, direction: pygame.Vector2) -> bool:
         """Mira na celula vizinha. False se nao ha direcao ou se ela e bloqueada."""
@@ -186,10 +194,15 @@ class Player:
             index = min(int(self._action_time * settings.ACTION_ANIM_FPS), len(frames) - 1)
             return frames[index]
 
-        # So existe um sprite de "stay", entao parado ele sempre olha para frente.
-        frames = self.animations[f"run_{self.facing}" if self.moving else IDLE]
-        index = int(self._anim_time * settings.PLAYER_ANIM_FPS) % len(frames)
-        return frames[index]
+        # Os quadros de "stay" sao todos de frente: parado ele olha para frente,
+        # seja qual for a direcao em que estava correndo.
+        if self.moving:
+            frames = self.animations[f"run_{self.facing}"]
+            index = int(self._anim_time * settings.PLAYER_ANIM_FPS)
+        else:
+            frames = self.animations[IDLE]
+            index = int(self._idle_time * settings.PLAYER_IDLE_FPS)
+        return frames[index % len(frames)]
 
     def draw(self, surface: pygame.Surface, view: View) -> None:
         frame = self.current_frame()

@@ -102,8 +102,9 @@ Ao zerar a estamina a tela escurece e mostra:
 
 ## Fertilizante
 
-Usar custa **1 fertilizante e 2 de estamina**, e faz duas coisas de uma vez: encurta o
-crescimento e estica a validade.
+Usar custa **1 fertilizante e 2 de estamina**, roda a animacao propria de regar (`fertilizing`)
+e faz duas coisas de uma vez: encurta o crescimento e estica a validade. Como nas outras acoes, o
+efeito so vale quando a animacao termina.
 
 | Cultura | Cresce em | Fertilizada cresce em | Dura | Fertilizada dura |
 | --- | --- | --- | --- | --- |

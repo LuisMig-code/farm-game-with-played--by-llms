@@ -31,13 +31,14 @@ MOVE_KEYS = {
 CONFIRM_KEYS = (pygame.K_SPACE, pygame.K_RETURN, pygame.K_KP_ENTER)
 
 HOUSE_ZONE, SHOP_ZONE = "casa", "comercio"
-PLANT, HARVEST, CLEAR = "plantar", "colher", "remover"
+PLANT, HARVEST, CLEAR, FERTILIZE = "plantar", "colher", "remover", "fertilizar"
 
 # Tipos de menu (viram a coluna `item` das linhas de menu no CSV)
 SEED_MENU, FERT_MENU = "semente", "fertilizante"
 SHOP_MENU, SELL_MENU, BUY_MENU = "comercio", "vender", "comprar"
 # Remover reaproveita a animacao de colheita: e o mesmo gesto de arrancar.
-ACTION_ANIMATION = {PLANT: "planting", HARVEST: "harvest", CLEAR: "harvest"}
+ACTION_ANIMATION = {PLANT: "planting", HARVEST: "harvest", CLEAR: "harvest",
+                    FERTILIZE: "fertilizing"}
 
 Cell = tuple[int, int]
 
@@ -251,6 +252,8 @@ class Game:
             removida = self.field.remove(cell)      # nao rende nada
             self.player.spend(settings.STAMINA_CLEAR)
             self._record("remover", cell=cell, item=removida, amount=1)
+        elif kind == FERTILIZE:
+            self._use_fertilizer(cell)
         else:
             harvested = self.field.harvest(cell)
             self.inventory.add(harvested)
@@ -431,7 +434,7 @@ class Game:
             self._start_action(PLANT, cell, value)
         elif kind == FERT_MENU:
             self._close_menu()
-            self._use_fertilizer(cell)
+            self._start_action(FERTILIZE, cell)
         elif kind == SHOP_MENU:
             self._open_menu(self._sell_menu(cell) if value == SELL_MENU
                             else self._buy_menu(cell))

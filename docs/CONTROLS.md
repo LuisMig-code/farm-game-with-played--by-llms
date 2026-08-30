@@ -50,9 +50,12 @@ superficie e so reaproveitado, ja que as areas nao mudam durante o jogo.
 - Apenas 4 direcoes: na diagonal, a horizontal tem prioridade.
 - So entra em celula andavel; ao esbarrar ele vira para o lado tentado mas nao sai do lugar.
 - Velocidade: 396 px/s, ou seja ~0,13s por celula (~8 celulas por segundo).
-- Animacoes: `run` nas 4 direcoes (4 quadros a 18 fps) e `stay` parado.
-  Como so existe um sprite de `stay`, parado ele sempre olha para frente.
-- `planting` e `harvest` tem 4 quadros a 8 fps (~0,5s). Enquanto rodam, o jogador nao anda
+- Animacoes de 4 quadros cada. `run` nas 4 direcoes roda a 15 fps, acompanhando a velocidade;
+  `stay` roda a 5 fps, bem mais devagar, porque e respiracao e nao passada.
+- Parado, a animacao continua rodando: correr e ficar parado tem relogios separados, entao parar
+  nao congela o personagem. Os quadros de `stay` sao todos de frente, entao parado ele sempre
+  olha para frente, seja qual for a direcao em que estava correndo.
+- `planting`, `harvest` e `fertilizing` tem 4 quadros a 8 fps (~0,5s). Enquanto rodam, o jogador nao anda
   nem aceita outra acao, e o efeito da acao so vale quando a animacao acaba.
 
 ## Plantas

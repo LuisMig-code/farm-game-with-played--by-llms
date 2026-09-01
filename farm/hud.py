@@ -6,6 +6,7 @@ from farm import assets, settings
 from farm.crops import BUY_PRICES, COIN, CROPS, ITEM_ICONS, ITEM_LABELS
 from farm.inventory import Inventory, RunStats
 from farm.market import Market
+from farm.seasons import Seasons
 from farm.view import View
 
 FONT_NAME = "consolas,couriernew,monospace"
@@ -47,6 +48,7 @@ class Hud:
         self.view = view
         self.fonts = Fonts()
         self.icons = IconSet()
+        self._season_icons: dict[tuple[str, int], pygame.Surface] = {}
         self._panel = pygame.Surface((settings.SCREEN_SIZE[0], settings.PANEL_HEIGHT),
                                      pygame.SRCALPHA)
 
@@ -106,6 +108,54 @@ class Hud:
                 _shadowed(surface, self.fonts.small, f"max: {limite}",
                           (x, settings.SLOTS_TOP + settings.SLOT_ICON_HEIGHT + 4),
                           settings.HUD_FULL_COLOR if cheio else settings.HUD_DIM_COLOR)
+
+    # ---------------------------------------------------- indicador de estacao
+
+    def draw_season_board(self, surface: pygame.Surface, seasons: Seasons, day: int) -> None:
+        """Estacao atual em destaque, com a proxima e a contagem de dias menores."""
+        tile = round(settings.TILE * self.view.scale)
+        col0, col1 = settings.SEASON_BOARD_COLS
+        row0, row1 = settings.SEASON_BOARD_ROWS
+        rect = pygame.Rect(col0 * tile, row0 * tile,
+                           (col1 - col0 + 1) * tile, (row1 - row0 + 1) * tile)
+
+        panel = pygame.Surface(rect.size, pygame.SRCALPHA)
+        panel.fill(settings.BOARD_BG_COLOR)
+        pygame.draw.rect(panel, settings.BOARD_BORDER_COLOR, panel.get_rect(), 2)
+
+        atual, proxima = seasons.current(day), seasons.upcoming(day)
+        icone = self._season_icon(atual, settings.SEASON_ICON_HEIGHT)
+        panel.blit(icone, icone.get_rect(midleft=(16, panel.get_height() // 2)))
+
+        texto_x = icone.get_width() + 32
+        nome = self.fonts.big.render(atual.label.upper(), True, settings.BOARD_TITLE_COLOR)
+        panel.blit(nome, (texto_x, 22))
+
+        seguinte = self.fonts.small.render(f"a seguir: {proxima.label}", True,
+                                           settings.SEASON_NEXT_COLOR)
+        panel.blit(seguinte, (texto_x, 76))
+
+        # O icone da proxima fica na linha de baixo, junto da contagem: na mesma
+        # linha do nome o texto estouraria a largura do painel.
+        pequeno = self._season_icon(proxima, settings.SEASON_NEXT_ICON_HEIGHT)
+        panel.blit(pequeno, (texto_x, 102))
+        dias = seasons.days_to_next(day)
+        contagem = self.fonts.small.render(f"em {dias} dia{'s' if dias > 1 else ''}", True,
+                                           settings.SEASON_NEXT_COLOR)
+        panel.blit(contagem, (texto_x + pequeno.get_width() + 10, 110))
+
+        surface.blit(panel, rect)
+
+    def _season_icon(self, season, height: int) -> pygame.Surface:
+        """Os icones de estacao nao estao no catalogo de itens: carrega direto."""
+        chave = (season.icon, height)
+        cached = self._season_icons.get(chave)
+        if cached is None:
+            fonte = assets.load_image(season.icon)
+            largura = round(fonte.get_width() * height / fonte.get_height())
+            cached = pygame.transform.smoothscale(fonte, (largura, height))
+            self._season_icons[chave] = cached
+        return cached
 
     # ------------------------------------------------------- quadro de precos
 

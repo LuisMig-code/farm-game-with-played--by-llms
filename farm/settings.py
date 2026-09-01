@@ -65,6 +65,10 @@ SUPPLY_DEMAND_DAILY_UNITS = 7    # a partir dessa quantidade no MESMO dia ja sat
 SUPPLY_DEMAND_DROP = 1           # moedas a menos por unidade vendida
 SUPPLY_DEMAND_RECOVERY = 1       # moedas de volta por dia sem vender
 
+# Estacoes: 30 dias cada, e nos ultimos dias o fundo da proxima entra por cima
+SEASON_DAYS = 30
+SEASON_BLEND = {4: 0.20, 3: 0.40, 2: 0.60, 1: 0.80}   # dias restantes -> opacidade
+
 # Dias
 FIRST_DAY = 1
 SLEEP_TRANSITION = 0.6  # segundos da tela entre um dia e outro
@@ -108,6 +112,13 @@ BOARD_SATURATED_COLOR = (240, 120, 105)  # preco de venda saturado
 BOARD_OLD_PRICE_COLOR = (150, 145, 140)
 BOARD_BUDGET_COLOR = (225, 225, 220)
 BOARD_BUDGET_LOW_COLOR = (240, 120, 105)   # caixa do dia nao cobre nem o mais barato
+
+# Indicador de estacao, na grama livre a esquerda do quadro de precos
+SEASON_BOARD_COLS = (11, 18)     # inclusivo; a coluna 11 ja e grama livre
+SEASON_BOARD_ROWS = (0, 2)       # inclusivo
+SEASON_ICON_HEIGHT = 88
+SEASON_NEXT_ICON_HEIGHT = 34
+SEASON_NEXT_COLOR = (205, 200, 190)
 
 # Barrinha de validade, acima da planta crescida
 FRESH_BAR_SIZE = (40, 6)

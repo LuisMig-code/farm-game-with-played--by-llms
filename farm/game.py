@@ -16,6 +16,7 @@ from farm.market import Market
 from farm.menu import Menu, Option
 from farm.player import Player
 from farm.run_log import RunLog
+from farm.seasons import Seasons
 from farm.spoil_record import SpoiledCells
 from farm.view import View
 from farm.zones import Zones
@@ -63,8 +64,8 @@ class Game:
         self.running = False
 
         self.view = View(settings.WORLD_SIZE, settings.SCREEN_SIZE)
-        # O mapa inteiro cabe na janela, entao reduzo o background uma unica vez.
-        self.background = self.view.scale_surface(assets.load_background())
+        # O fundo agora depende do dia: quem cuida dele e o Seasons.
+        self.seasons = Seasons(self.view)
         self.grid = Grid(settings.GRID_COLS, settings.GRID_ROWS, settings.TILE)
         self.zones = Zones(self.grid, self.view)
         self.hud = Hud(self.view)
@@ -264,7 +265,11 @@ class Game:
         self.state = State.PLAYING
 
     def _sleep(self) -> None:
+        anterior = self.seasons.current(self.day)
         self.day += 1
+        if self.seasons.current(self.day) is not anterior:
+            logger.info("virou a estacao: %s -> %s", anterior.label,
+                        self.seasons.current(self.day).label)
         self.stats.days = self.day
         self.player.restore()
         self.state = State.SLEEPING
@@ -455,10 +460,11 @@ class Game:
         return cell if self.grid.contains(*cell) else None
 
     def _draw(self) -> None:
-        self.screen.blit(self.background, (0, 0))
+        self.screen.blit(self.seasons.background(self.day), (0, 0))
         self.zones.draw(self.screen)
         self.grid.draw(self.screen, self.view, self.hovered_cell())
         self.hud.draw_price_board(self.screen, self.market, self.day)
+        self.hud.draw_season_board(self.screen, self.seasons, self.day)
         self.field.draw(self.screen, self.view, self.day)
         self.player.draw(self.screen, self.view)
 

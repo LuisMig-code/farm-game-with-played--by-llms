@@ -153,6 +153,44 @@ verde em cima de uma planta podre passaria a mensagem errada; o sprite escuro j�
 Para liberar a célula é preciso ir até lá e apertar Espaço: a remoção custa **2 de estamina**,
 não rende nada e usa a mesma animação da colheita. Depois disso dá para plantar de novo.
 
+## Estações do ano
+
+O ano roda em **4 estações de 30 dias cada**, na ordem Primavera → Verão → Outono → Inverno e de
+volta. A run começa no dia 1, na primavera.
+
+| Estação | Dias | Fundo |
+| --- | --- | --- |
+| Primavera | 1-30 | `main-background.png` |
+| Verão | 31-60 | `main-background-summer.png` |
+| Outono | 61-90 | `main-background-fall.png` |
+| Inverno | 91-120 | `main-background-winter.png` |
+
+Depois do dia 120 o ciclo recomeça na primavera. Como tudo é derivado do dia, não há estado
+guardado: o dia 121 é primavera pelo mesmo cálculo que faz o dia 1 ser.
+
+**Por enquanto isso é só visual.** Nenhuma mecânica muda com a estação — preços, crescimento,
+validade, estamina e mercado funcionam igual o ano inteiro.
+
+### Transição
+
+Nos últimos 4 dias da estação o fundo da próxima vai aparecendo por cima, para a virada não ser um
+corte seco:
+
+| Dias restantes | Opacidade do novo fundo |
+| --- | --- |
+| 4 | 20% |
+| 3 | 40% |
+| 2 | 60% |
+| 1 | 80% |
+
+No dia seguinte a estação virou e o fundo novo aparece inteiro. Os quatro fundos são o mesmo mapa
+desenhado nas quatro estações, alinhados pixel a pixel, então a mistura não desloca nada.
+
+### Indicador
+
+No topo da tela, à esquerda do quadro de preços, um painel mostra o ícone e o nome da estação
+atual em destaque e, menores, o ícone e o nome da próxima com quantos dias faltam para ela.
+
 ## Comércio
 
 Espaço na célula (21,12) abre a loja. **Negociar não custa estamina** — só o caminho até lá.
@@ -257,4 +295,4 @@ Cada run grava um `.log` de texto e um `.csv` com todas as ações, movimentaç�
 
 ## Ainda não implementado
 
-- **Estações**: os ícones `icon verao/outono/inverno.png` existem, mas não há sistema por trás.
+- **Efeito das estações**: a virada muda o visual, mas nenhuma mecânica.

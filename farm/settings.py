@@ -31,6 +31,8 @@ PLAYER_HEIGHT = 110       # altura do sprite em pixels de mundo (~2 celulas)
 PLAYER_SPEED = 396        # pixels de mundo por segundo (~0,13s por celula)
 PLAYER_ANIM_FPS = 15      # acompanha PLAYER_SPEED, senao a passada patina
 PLAYER_IDLE_FPS = 5       # respiracao parado: bem mais lenta que a corrida
+PLAYER_SHADOW_RATIO = 0.9    # largura da sombra, em fracao da largura do jogador
+PLAYER_SHADOW_ALPHA = 0.8
 
 # Acoes do jogador (plantar/colher): 4 quadros, ~0,5s cada animacao
 ACTION_ANIM_FPS = 8

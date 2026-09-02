@@ -9,9 +9,10 @@
 | `R`               | Só na tela de derrota: recomeça a partida                 |
 | Mouse             | Destaca a célula sob o cursor                             |
 
-O que o Espaço faz em cada célula, e todas as regras de estamina, dias, cultivo, validade e
-fertilizante, estão em [GAME_RULES.md](GAME_RULES.md). Cada partida grava um log de texto e um CSV em `logs/`,
-descritos em [LOGS.md](LOGS.md).
+As regras estão separadas por assunto: [GAME_RULES.md](GAME_RULES.md) para estamina, dias e
+derrota, [CULTIVO.md](CULTIVO.md) para plantio e colheita, [COMERCIO.md](COMERCIO.md) para a loja,
+[ESTACOES.md](ESTACOES.md) para o que cada estação muda e [LOGS.md](LOGS.md) para os arquivos que
+cada partida grava.
 
 ## Mundo e grid
 

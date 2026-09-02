@@ -117,10 +117,22 @@ class Game:
     def _record_spoiled(self) -> None:
         """Guarda o que apodreceu hoje. Esse registro nao aparece para o jogador."""
         for cell, crop in self.field.newly_spoiled(self.day):
-            self.stats.spoiled[crop] += 1
-            self.spoiled_cells.record(cell, crop, self.day, self.run_log.run_id)
-            self._record("estragou", cell=cell, item=crop, amount=1)
-            logger.info("estragou: %s em %s", crop, cell)
+            self._record_spoilage(cell, crop)
+
+    def _record_spoilage(self, cell: Cell, crop: str) -> None:
+        """Ponto unico de gravacao: vale para o prazo vencido e para o inverno."""
+        self.stats.spoiled[crop] += 1
+        self.spoiled_cells.record(cell, crop, self.day, self.run_log.run_id)
+        self._record("estragou", cell=cell, item=crop, amount=1)
+        logger.info("estragou: %s em %s", crop, cell)
+
+    def _freeze_if_blocked(self, anterior) -> None:
+        """Virada para uma estacao sem plantio: o campo inteiro apodrece na hora."""
+        atual = self.seasons.current(self.day)
+        if atual is anterior or atual.can_plant:
+            return
+        for cell, crop in self.field.freeze_all():
+            self._record_spoilage(cell, crop)
 
     def _record_promotions(self) -> None:
         for item, desconto in self.market.promos.items():
@@ -279,6 +291,7 @@ class Game:
         self.fertilizers_today = 0
         self.market.new_day(self.day)
         self._record_promotions()
+        self._freeze_if_blocked(anterior)
         self._record_spoiled()
 
     def _game_over(self) -> None:
@@ -347,6 +360,13 @@ class Game:
             self.menu.move(1)
 
     def _open_seed_menu(self, cell: Cell) -> None:
+        estacao = self.seasons.current(self.day)
+        if not estacao.can_plant:
+            self._open_menu(Menu(SEED_MENU, f"{estacao.label} na fazenda",
+                                 [Option(f"Nada cresce no {estacao.label.lower()}",
+                                         enabled=False)], cell))
+            return
+
         options = [
             Option(f"{crop.label} ({self.inventory.count(seed_key(key))})",
                    value=key, icon=seed_key(key))
@@ -360,8 +380,11 @@ class Game:
         """A opcao desabilitada diz o motivo, para o jogador nao ficar no escuro."""
         crop = CROPS[self.field.at(cell).crop]
         count = self.inventory.count(FERTILIZER)
+        estacao = self.seasons.current(self.day)
 
-        if self.field.is_fertilized(cell):
+        if not estacao.fertilizer_works:
+            option = Option(f"Não funciona no {estacao.label.lower()}", enabled=False)
+        elif self.field.is_fertilized(cell):
             option = Option("Já fertilizada", enabled=False)
         elif self.fertilizers_today >= settings.FERTILIZERS_PER_DAY:
             option = Option(f"Limite de {settings.FERTILIZERS_PER_DAY} por dia", enabled=False)

@@ -109,6 +109,7 @@ BOARD_TITLE_COLOR = (255, 235, 170)
 BOARD_PRICE_COLOR = (255, 255, 255)
 BOARD_PROMO_COLOR = (255, 205, 70)     # preco de compra em promocao
 BOARD_SATURATED_COLOR = (240, 120, 105)  # preco de venda saturado
+BOARD_BONUS_COLOR = (120, 225, 120)      # preco acima do base (inverno)
 BOARD_OLD_PRICE_COLOR = (150, 145, 140)
 BOARD_BUDGET_COLOR = (225, 225, 220)
 BOARD_BUDGET_LOW_COLOR = (240, 120, 105)   # caixa do dia nao cobre nem o mais barato

@@ -8,6 +8,7 @@ import pygame
 from farm import assets, settings
 from farm.crops import CROPS
 from farm.grid import Grid
+from farm.seasons import season_at
 from farm.view import View
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,9 @@ class Plot:
     crop: str
     planted_day: int
     fertilized: bool = False
+    # Excecao ao modelo derivado da idade, e de proposito: o apodrecimento da
+    # virada do inverno e um evento, nao uma funcao do tempo.
+    spoiled: bool = False
 
 
 class Field:
@@ -48,16 +52,26 @@ class Field:
 
     @staticmethod
     def timing(plot: Plot) -> tuple[int, int]:
-        """Dias para crescer e de validade, ja com o efeito do fertilizante."""
+        """Dias para crescer e de validade dessa planta.
+
+        A estacao usada e a do **plantio**, nao a do dia: o prazo congela quando
+        a semente entra no chao. Sem isso uma planta pronta poderia voltar a nao
+        estar pronta na virada do outono, e as barras andariam para tras.
+        """
         crop = CROPS[plot.crop]
-        if not plot.fertilized:
-            return crop.grow_days, crop.shelf_days
-        return (max(0, crop.grow_days - crop.fert_grow_cut),
-                crop.shelf_days + crop.fert_shelf_bonus)
+        season = season_at(plot.planted_day)
+        grow = crop.grow_days + season.grow_delta
+        shelf = season.shelf_days.get(plot.crop, crop.shelf_days)
+        if plot.fertilized:
+            grow = max(0, grow - crop.fert_grow_cut)
+            shelf += crop.fert_shelf_bonus
+        return grow, shelf
 
     def stage_index(self, cell: Cell, day: int) -> int:
         """0 plantado, 1 germinando, 2 crescido, 3 estragado (imagens 1 a 4)."""
         plot = self.plots[cell]
+        if plot.spoiled:
+            return 3
         grow, shelf = self.timing(plot)
         age = day - plot.planted_day
         if age >= grow + shelf:
@@ -87,9 +101,19 @@ class Field:
         """Plantas que apodreceram exatamente hoje."""
         estragadas = []
         for cell, plot in self.plots.items():
-            if self.age(cell, day) == sum(self.timing(plot)):
+            if not plot.spoiled and self.age(cell, day) == sum(self.timing(plot)):
                 estragadas.append((cell, plot.crop))
         return estragadas
+
+    def freeze_all(self) -> list[tuple[Cell, str]]:
+        """Inverno: tudo que esta no chao apodrece na hora. Devolve o que virou."""
+        congeladas = [(cell, plot.crop) for cell, plot in self.plots.items()
+                      if not plot.spoiled]
+        for cell, _ in congeladas:
+            self.plots[cell].spoiled = True
+        if congeladas:
+            logger.info("a virada do inverno estragou %d plantacao(oes)", len(congeladas))
+        return congeladas
 
     def progress(self, cell: Cell, day: int) -> float:
         """Quanto falta para colher, de 0 (recem plantado) a 1 (pronto)."""

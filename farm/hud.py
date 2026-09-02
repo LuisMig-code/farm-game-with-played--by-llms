@@ -129,20 +129,25 @@ class Hud:
 
         texto_x = icone.get_width() + 32
         nome = self.fonts.big.render(atual.label.upper(), True, settings.BOARD_TITLE_COLOR)
-        panel.blit(nome, (texto_x, 22))
+        panel.blit(nome, (texto_x, 12))
 
         seguinte = self.fonts.small.render(f"a seguir: {proxima.label}", True,
                                            settings.SEASON_NEXT_COLOR)
-        panel.blit(seguinte, (texto_x, 76))
+        panel.blit(seguinte, (texto_x, 58))
 
         # O icone da proxima fica na linha de baixo, junto da contagem: na mesma
         # linha do nome o texto estouraria a largura do painel.
         pequeno = self._season_icon(proxima, settings.SEASON_NEXT_ICON_HEIGHT)
-        panel.blit(pequeno, (texto_x, 102))
+        panel.blit(pequeno, (texto_x, 80))
         dias = seasons.days_to_next(day)
         contagem = self.fonts.small.render(f"em {dias} dia{'s' if dias > 1 else ''}", True,
                                            settings.SEASON_NEXT_COLOR)
-        panel.blit(contagem, (texto_x + pequeno.get_width() + 10, 110))
+        panel.blit(contagem, (texto_x + pequeno.get_width() + 10, 88))
+
+        # O efeito vai no rodape, ocupando a largura toda: ao lado do icone nao
+        # caberia sem cortar a frase.
+        efeito = self.fonts.small.render(atual.effect, True, settings.BOARD_TITLE_COLOR)
+        panel.blit(efeito, (14, panel.get_height() - 28))
 
         surface.blit(panel, rect)
 
@@ -193,12 +198,12 @@ class Hud:
     def _draw_budget(self, panel: pygame.Surface, market: Market, day: int,
                      center: tuple[int, int]) -> None:
         """Caixa que a loja ainda tem hoje para pagar por colheita."""
-        saldo = market.budget_left
+        saldo = market.budget_left(day)
         mais_barato = min(market.sell_price(k, day) for k in CROPS)
         cor = (settings.BOARD_BUDGET_COLOR if saldo >= mais_barato
                else settings.BOARD_BUDGET_LOW_COLOR)
         texto = self.fonts.small.render(
-            f"caixa {saldo}/{settings.MARKET_DAILY_BUDGET}", True, cor)
+            f"caixa {saldo}/{market.daily_budget(day)}", True, cor)
         panel.blit(texto, texto.get_rect(center=center))
 
     def _draw_board_section(self, panel, cell, market: Market, *, row: int,
@@ -220,6 +225,10 @@ class Hud:
             texto = self.fonts.normal.render(str(price), True, settings.BOARD_PRICE_COLOR)
             panel.blit(texto, texto.get_rect(center=rect.center))
             return
+
+        # Acima do base e bonus (inverno), nao perda: a cor tem que dizer isso.
+        if price > base:
+            destaque = settings.BOARD_BONUS_COLOR
 
         # Preco alterado: o base fica riscado em cima, o atual em destaque embaixo.
         antigo = self.fonts.small.render(str(base), True, settings.BOARD_OLD_PRICE_COLOR)

@@ -6,6 +6,8 @@ from collections import Counter
 
 from farm import settings
 from farm.crops import BUY_PRICES, CROPS, STOCK_RANGES
+from farm.seasons import (daily_budget, promo_discounts, promo_item_chances,
+                          season_at)
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +29,7 @@ class Market:
         self._spent_today = 0                  # moedas que o jogador gastou hoje
         self.stock: dict[str, int] = {}
         self.roll_stock()                      # antes da promocao: ela depende dele
-        self.roll_promotions()
+        self.roll_promotions(settings.FIRST_DAY)
 
     # --------------------------------------------------------------- estoque
 
@@ -42,17 +44,21 @@ class Market:
 
     # ----------------------------------------------------------- caixa do dia
 
-    @property
-    def budget_left(self) -> int:
+    @staticmethod
+    def daily_budget(day: int) -> int:
+        """Teto do dia. O inverno paga mais, entao tambem tem mais caixa."""
+        return daily_budget(day)
+
+    def budget_left(self, day: int) -> int:
         """Quanto a loja ainda pode pagar hoje.
 
         Comprar devolve caixa ao mercado, entao gastar na loja levanta o teto do
         dia -- inclusive depois de ele ter zerado.
         """
-        return settings.MARKET_DAILY_BUDGET + self._spent_today - self._paid_today
+        return self.daily_budget(day) + self._spent_today - self._paid_today
 
     def can_sell(self, crop: str, day: int) -> bool:
-        return self.sell_price(crop, day) <= self.budget_left
+        return self.sell_price(crop, day) <= self.budget_left(day)
 
     def register_purchase(self, item: str, price: int) -> None:
         self.stock[item] = max(0, self.stock_left(item) - 1)
@@ -64,9 +70,14 @@ class Market:
         """Preco de compra do dia, ja com a promocao. Nunca abaixo de MIN_PRICE."""
         return BUY_PRICES[item] - self.promos.get(item, 0)
 
+    def base_price(self, crop: str, day: int) -> int:
+        """Preco cheio do dia, ja com o multiplicador da estacao."""
+        multiplicador = season_at(day).sell_multiplier.get(crop, 1)
+        return round(CROPS[crop].sell_price * multiplicador)
+
     def sell_price(self, crop: str, day: int) -> int:
         """Preco de venda do dia. So cai depois que a oferta/demanda liga."""
-        base = CROPS[crop].sell_price
+        base = self.base_price(crop, day)
         if not self.supply_demand_active(day):
             return base
         return max(CROPS[crop].seed_price, base - self.saturation.get(crop, 0))
@@ -135,7 +146,7 @@ class Market:
         self._sold_today = Counter()
         self._paid_today = self._spent_today = 0   # caixa nao acumula entre dias
         self.roll_stock()
-        self.roll_promotions()
+        self.roll_promotions(day)
 
     def _recover(self) -> None:
         """Cultura que nao foi vendida ontem recupera parte do preco."""
@@ -150,21 +161,21 @@ class Market:
 
     # ------------------------------------------------------------- promocoes
 
-    def roll_promotions(self) -> dict[str, int]:
+    def roll_promotions(self, day: int) -> dict[str, int]:
         """Sorteia as promocoes do dia e devolve as que sairam.
 
         Sao tres sorteios: quantos itens, quais itens (uniforme, sem peso) e o
         tamanho de cada desconto (esse sim, com peso).
         """
         self.promos = {}
-        for item in self._draw_items():
-            self.promos[item] = self._draw_discount(BUY_PRICES[item])
+        for item in self._draw_items(day):
+            self.promos[item] = self._draw_discount(BUY_PRICES[item], day)
 
         if self.promos:
             logger.info("promocao do dia: %s", {k: f"-{v}" for k, v in self.promos.items()})
         return dict(self.promos)
 
-    def _draw_items(self) -> list[str]:
+    def _draw_items(self, day: int) -> list[str]:
         """Quantos e quais itens entram em promocao hoje.
 
         So concorrem itens com estoque: nao adianta anunciar desconto em semente
@@ -177,18 +188,19 @@ class Market:
 
         chance = self.rng.random()
         acumulado = 0.0
-        for quantidade, peso in settings.PROMO_ITEM_CHANCES:
+        for quantidade, peso in promo_item_chances(day):
             acumulado += peso
             if chance < acumulado:
                 return self.rng.sample(disponiveis, min(quantidade, len(disponiveis)))
         return []
 
-    def _draw_discount(self, base_price: int) -> int:
+    def _draw_discount(self, base_price: int, day: int) -> int:
+        tabela = promo_discounts(day)
         if base_price < settings.PROMO_SMALL_PRICE:
-            desconto = settings.PROMO_DISCOUNTS[0][0]   # item barato: o menor desconto
+            desconto = tabela[0][0]                    # item barato: o menor desconto
         else:
-            valores = [v for v, _ in settings.PROMO_DISCOUNTS]
-            pesos = [p for _, p in settings.PROMO_DISCOUNTS]
+            valores = [v for v, _ in tabela]
+            pesos = [p for _, p in tabela]
             desconto = self.rng.choices(valores, weights=pesos, k=1)[0]
         # Guardar o desconto ja limitado deixa o "nunca de graca" estrutural.
         return min(desconto, base_price - settings.MIN_PRICE)

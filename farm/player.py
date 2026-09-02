@@ -27,6 +27,7 @@ class Player:
     def __init__(self, view: View, zones: Zones, start_cell: tuple[int, int],
                  on_step=None):
         self.animations = self._load_animations(view)
+        self.shadow = self._load_shadow(view)
         self.zones = zones
 
         # Escala em pixels de MUNDO (a logica do jogo ignora a escala da tela).
@@ -72,6 +73,20 @@ class Player:
             name: [view.scale_surface(frame, factor) for frame in assets.load_frames(names)]
             for name, names in sources.items()
         }
+
+    @staticmethod
+    def _load_shadow(view: View) -> pygame.Surface:
+        """Elipse sob os pes, dimensionada pela largura do personagem.
+
+        O alpha e aplicado uma vez aqui: `scale_surface` devolve superficie nova,
+        entao mexer nela nao contamina o cache de imagens.
+        """
+        largura_jogador = settings.PLAYER_HEIGHT * SPRITE_SIZE[0] / SPRITE_SIZE[1]
+        alvo = largura_jogador * settings.PLAYER_SHADOW_RATIO
+        fonte = assets.load_image(f"{settings.CHARACTER_DIR}/shadow.png")
+        sombra = view.scale_surface(fonte, alvo / fonte.get_width())
+        sombra.set_alpha(round(255 * settings.PLAYER_SHADOW_ALPHA))
+        return sombra
 
     # ------------------------------------------------------------ propriedades
 
@@ -205,10 +220,13 @@ class Player:
         return frames[index % len(frames)]
 
     def draw(self, surface: pygame.Surface, view: View) -> None:
-        frame = self.current_frame()
         screen_pos = view.world_to_screen(self.pos)
-        surface.blit(frame, frame.get_rect(midbottom=(round(screen_pos[0]),
-                                                      round(screen_pos[1]))))
+        pes = (round(screen_pos[0]), round(screen_pos[1]))
+
+        # A sombra vem antes: fica sob os pes, centrada no ponto onde ele pisa.
+        surface.blit(self.shadow, self.shadow.get_rect(center=pes))
+        frame = self.current_frame()
+        surface.blit(frame, frame.get_rect(midbottom=pes))
 
 
 def cell_center(col: int, row: int) -> pygame.Vector2:

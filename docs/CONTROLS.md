@@ -56,6 +56,9 @@ superficie e so reaproveitado, ja que as areas nao mudam durante o jogo.
 - Parado, a animacao continua rodando: correr e ficar parado tem relogios separados, entao parar
   nao congela o personagem. Os quadros de `stay` sao todos de frente, entao parado ele sempre
   olha para frente, seja qual for a direcao em que estava correndo.
+- Uma sombra elíptica é desenhada **antes** do sprite, centrada no ponto onde ele pisa, com 80% de
+  opacidade e 90% da largura do personagem. Como acompanha a posição, ela desliza junto na
+  caminhada e fica sob os pés em qualquer animação.
 - `planting`, `harvest` e `fertilizing` tem 4 quadros a 8 fps (~0,5s). Enquanto rodam, o jogador nao anda
   nem aceita outra acao, e o efeito da acao so vale quando a animacao acaba.
 

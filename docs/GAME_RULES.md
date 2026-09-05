@@ -12,6 +12,7 @@ Este arquivo tem o que vale para a partida inteira. O resto está separado por a
 | [ESTACOES.md](ESTACOES.md) | o ciclo do ano e o que cada estação muda |
 | [CONTROLS.md](CONTROLS.md) | teclas e o que o Espaço faz em cada célula |
 | [LOGS.md](LOGS.md) | os arquivos que cada partida grava |
+| [SEMENTE.md](SEMENTE.md) | a `SEED` que faz duas partidas terem o mesmo cenário |
 
 O objetivo é cultivar sem ficar sem energia. Andar, plantar e colher gastam estamina; só
 dormir em casa recupera. Chegar a zero encerra a partida.

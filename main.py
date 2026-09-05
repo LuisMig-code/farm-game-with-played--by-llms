@@ -1,5 +1,6 @@
 """Ponto de entrada do jogo de fazenda."""
 
+import argparse
 import logging
 import sys
 
@@ -19,10 +20,21 @@ def setup_logging() -> None:
     )
 
 
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Farm Game")
+    parser.add_argument(
+        "--seed", type=int, default=None,
+        help=(f"semente do cenario; sem ela vale {settings.SEED_ENV} e, por fim, "
+              "settings.SEED. A mesma semente da o mesmo estoque e a mesma "
+              "promocao em cada dia."))
+    return parser.parse_args(argv)
+
+
 def main() -> None:
+    args = parse_args()
     setup_logging()
     try:
-        Game().run()
+        Game(seed=args.seed).run()
     finally:
         pygame.quit()
 

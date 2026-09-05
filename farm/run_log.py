@@ -2,10 +2,13 @@
 
 Uma run e uma partida: comeca no dia 1 e termina ao perder, ao reiniciar com R
 ou ao sair do jogo. Cada uma gera dois arquivos em logs/, nomeados com o id da
-run e a data/hora de inicio:
+run, a semente do cenario e a data/hora de inicio:
 
-    run_<id>_<AAAA-MM-DD_HH-MM-SS>.log   texto, o mesmo do console
-    run_<id>_<AAAA-MM-DD_HH-MM-SS>.csv   uma linha por acao, movimentacao inclusa
+    run_<id>_semente<N>_<AAAA-MM-DD_HH-MM-SS>.log   texto, o mesmo do console
+    run_<id>_semente<N>_<AAAA-MM-DD_HH-MM-SS>.csv   uma linha por acao, com movimentacao
+
+A semente vai no nome de proposito: e o que permite escolher a partida a repetir
+sem abrir arquivo nenhum.
 """
 
 import csv
@@ -29,14 +32,18 @@ Cell = tuple[int, int]
 
 
 class RunLog:
-    def __init__(self, logs_dir: Path):
+    def __init__(self, logs_dir: Path, seed: int):
+        # O id continua sorteado: duas runs com a mesma semente sao cenarios
+        # iguais, mas partidas diferentes, e precisam de arquivos separados.
         self.run_id = uuid.uuid4().hex[:8]
+        self.seed = seed
         self.started_at = datetime.now()
         self._clock = time.perf_counter()
         self._closed = False
 
         logs_dir.mkdir(exist_ok=True)
-        stem = f"run_{self.run_id}_{self.started_at:%Y-%m-%d_%H-%M-%S}"
+        stem = (f"run_{self.run_id}_semente{self.seed}"
+                f"_{self.started_at:%Y-%m-%d_%H-%M-%S}")
         self.text_path = logs_dir / f"{stem}.log"
         self.csv_path = logs_dir / f"{stem}.csv"
 
@@ -56,8 +63,8 @@ class RunLog:
         self._writer.writerow(CSV_HEADER)
         self._file.flush()
 
-        logger.info("run %s iniciada | %s | %s", self.run_id,
-                    self.text_path.name, self.csv_path.name)
+        logger.info("run %s iniciada | semente %s | %s | %s", self.run_id,
+                    self.seed, self.text_path.name, self.csv_path.name)
 
     def record(self, action: str, *, day: int, stamina: int,
                origin: Cell | None = None, cell: Cell | None = None,

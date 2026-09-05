@@ -1,11 +1,11 @@
 """Precos da loja: promocao diaria e saturacao por excesso de venda."""
 
 import logging
-import random
 from collections import Counter
 
 from farm import settings
 from farm.crops import BUY_PRICES, CROPS, STOCK_RANGES
+from farm.rng import MARKET, stream
 from farm.seasons import (daily_budget, promo_discounts, promo_item_chances,
                           season_at)
 
@@ -16,11 +16,12 @@ class Market:
     """Guarda o que muda de preco no dia: promocoes e saturacao das culturas.
 
     Os precos base ficam no catalogo (`farm/crops.py`); aqui so vive o desvio.
-    O `rng` e injetavel para os testes poderem semear o sorteio.
+    A `seed` fixa o cenario: a mesma semente da o mesmo estoque e a mesma
+    promocao em cada dia, em qualquer partida.
     """
 
-    def __init__(self, rng: random.Random | None = None):
-        self.rng = rng or random.Random()
+    def __init__(self, seed: int):
+        self.seed = seed
         self.promos: dict[str, int] = {}       # item de compra -> desconto do dia
         self.saturation: dict[str, int] = {}   # cultura -> moedas ja descontadas
         self._sold_today: Counter[str] = Counter()
@@ -28,8 +29,7 @@ class Market:
         self._paid_today = 0                   # moedas que a loja pagou hoje
         self._spent_today = 0                  # moedas que o jogador gastou hoje
         self.stock: dict[str, int] = {}
-        self.roll_stock()                      # antes da promocao: ela depende dele
-        self.roll_promotions(settings.FIRST_DAY)
+        self._roll_day(settings.FIRST_DAY)
 
     # --------------------------------------------------------------- estoque
 
@@ -145,7 +145,17 @@ class Market:
         self._sold_yesterday = self._sold_today
         self._sold_today = Counter()
         self._paid_today = self._spent_today = 0   # caixa nao acumula entre dias
-        self.roll_stock()
+        self._roll_day(day)
+
+    def _roll_day(self, day: int) -> None:
+        """Os sorteios do dia, sobre um RNG refeito a partir de (semente, dia).
+
+        Recomecar o fluxo todo dia e o que faz o cenario do dia 30 ser o mesmo
+        dia 30 sempre -- nao importa por quais dias a partida passou antes, nem
+        o que for sorteado por outros sistemas no futuro.
+        """
+        self.rng = stream(self.seed, MARKET, day)
+        self.roll_stock()                      # antes da promocao: ela depende dele
         self.roll_promotions(day)
 
     def _recover(self) -> None:

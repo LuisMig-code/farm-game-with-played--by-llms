@@ -5,13 +5,17 @@ fechar o jogo. Cada run gera **dois arquivos** em `logs/`, com o mesmo nome e ex
 diferentes:
 
 ```
-run_<id>_<AAAA-MM-DD_HH-MM-SS>.log   texto, igual ao que sai no console
-run_<id>_<AAAA-MM-DD_HH-MM-SS>.csv   uma linha por ação, movimentação inclusa
+run_<id>_semente<N>_<AAAA-MM-DD_HH-MM-SS>.log   texto, igual ao que sai no console
+run_<id>_semente<N>_<AAAA-MM-DD_HH-MM-SS>.csv   uma linha por ação, movimentação inclusa
 ```
 
-O `<id>` são 8 caracteres hexadecimais sorteados no início da run, e o datetime é o momento
-em que ela começou. Reiniciar com `R` fecha o par anterior e abre um novo — os arquivos de
-uma run nunca se misturam.
+O `<id>` são 8 caracteres hexadecimais sorteados no início da run, o `<N>` é a semente do
+cenário (ver [SEMENTE.md](SEMENTE.md)) e o datetime é o momento em que ela começou. Reiniciar
+com `R` fecha o par anterior e abre um novo — os arquivos de uma run nunca se misturam.
+
+A semente vai no nome de propósito: é o que permite escolher qual partida repetir sem abrir
+arquivo nenhum. Ela também aparece na primeira linha do `.log`, junto do `id`. Duas runs com a
+mesma semente são o mesmo cenário, mas partidas diferentes — o `id` é o que as separa.
 
 Implementação em [`farm/run_log.py`](../farm/run_log.py). O arquivo de texto é só um
 `FileHandler` pendurado no logger raiz enquanto a run dura; o `main.py` cuida apenas do

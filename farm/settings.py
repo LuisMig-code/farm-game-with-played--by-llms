@@ -51,6 +51,14 @@ FERTILIZERS_PER_DAY = 3  # quantos o jogador pode usar por dia
 STARTING_SEEDS = 1      # de cada tipo
 STARTING_FERTILIZER = 2
 
+# Aleatoriedade
+# Mesma semente => mesmo estoque e mesma promocao em cada dia, em qualquer
+# partida futura. `None` sorteia uma na largada e grava o numero no nome do log,
+# entao ate um cenario "aleatorio" pode ser repetido depois.
+# Ordem de prioridade: --seed na linha de comando, FARM_SEED, este valor.
+SEED: int | None = 2026
+SEED_ENV = "FARM_SEED"
+
 # Mercado
 # Quantos itens entram em promocao no dia. Os casos sao mutuamente exclusivos
 # e o que sobra (25%) e dia sem promocao.

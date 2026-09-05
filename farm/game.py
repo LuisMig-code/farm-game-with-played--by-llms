@@ -1,7 +1,6 @@
 """Loop principal e maquina de estados do jogo."""
 
 import logging
-import random
 from enum import Enum, auto
 
 import pygame
@@ -15,6 +14,7 @@ from farm.inventory import RunStats, starting_inventory
 from farm.market import Market
 from farm.menu import Menu, Option
 from farm.player import Player
+from farm.rng import resolve_seed
 from farm.run_log import RunLog
 from farm.seasons import Seasons
 from farm.spoil_record import SpoiledCells
@@ -53,7 +53,7 @@ class State(Enum):
 
 
 class Game:
-    def __init__(self) -> None:
+    def __init__(self, seed: int | None = None) -> None:
         pygame.init()
         # SCALED: se a janela nao couber no monitor, o SDL reduz sozinho
         # mantendo as coordenadas logicas em SCREEN_SIZE.
@@ -71,6 +71,9 @@ class Game:
         self.hud = Hud(self.view)
         # Atravessa o R de proposito: o historico e acumulado entre partidas.
         self.spoiled_cells = SpoiledCells(settings.LOGS_DIR / settings.SPOILED_LOG)
+        # Fora do _reset de proposito: assim o R repete o mesmo cenario em vez de
+        # sortear outro -- inclusive quando a semente veio de um sorteio.
+        self.seed = resolve_seed(seed)
 
         self._reset()
 
@@ -88,14 +91,14 @@ class Game:
         anterior = getattr(self, "run_log", None)
         if anterior is not None:
             anterior.close("reiniciada")
-        self.run_log = RunLog(settings.LOGS_DIR)
+        self.run_log = RunLog(settings.LOGS_DIR, self.seed)
 
         self.state = State.PLAYING
         self.day = settings.FIRST_DAY
         self.inventory = starting_inventory()
         self.stats = RunStats(days=self.day)
         self.field = Field(self.grid, self.view)
-        self.market = Market(random.Random())
+        self.market = Market(self.seed)
         self.player = Player(self.view, self.zones, settings.PLAYER_START_CELL,
                              on_step=self._on_step)
         self.menu: Menu | None = None
@@ -510,7 +513,8 @@ class Game:
         return [
             f"jogador {cell} {self.zones.zone_of(cell)}{self._plot_label(cell)}   "
             f"mouse {hover if hover else '--'}   "
-            f"grid+zonas {'ON' if self.grid.visible else 'OFF'}",
+            f"grid+zonas {'ON' if self.grid.visible else 'OFF'}   "
+            f"semente {self.seed}",
             "WASD/setas: mover   Espaço: agir/dormir   G: grid   ESC: sair",
         ]
 

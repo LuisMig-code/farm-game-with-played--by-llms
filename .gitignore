@@ -18,3 +18,9 @@ Thumbs.db
 desktop.ini
 
 docs/Todo_Implementations.md
+
+# Segredos: chave do OpenRouter
+.env
+
+# Runs dos agentes LLM (prompts, respostas, videos)
+runs_llm/

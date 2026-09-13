@@ -53,6 +53,16 @@ DIARY_DAYS = 5                 # janela do diario gerado pelo codigo
 STAMINA_RESERVE = 1
 
 # ------------------------------------------------------------- execucao
-REALTIME = False               # False: passo fixo de 1/60s, video em tempo de jogo
+REALTIME = False               # False: passo fixo de 1/60s, sem esperar o relogio
+# Velocidade das acoes na tela: andar, plantar, colher, fertilizar, limpar e a
+# transicao do sono. 1.0 = a do jogo; 2.0 = cada uma na metade do tempo, e o
+# video junto. Nao muda regra: estamina, crescimento e precos contam passos e
+# dias, nao segundos. Teto: `Session.max_speed()` (~7x a 60 fps).
+GAME_SPEED = 2.0
 VIDEO = True
 RUNS_DIR = ROOT_DIR / "runs_llm"
+# Ao fim da run, os logs nativos do jogo tambem vao para a pasta de logs do jogo
+# (a mesma de farm/settings.py), com o prefixo IA_<modelo>_ para nao se misturarem
+# com os das partidas jogadas por gente. A copia original fica em jogo/, na run.
+GAME_LOGS_DIR = ROOT_DIR / "logs"
+GAME_LOGS_PREFIX = "IA_{modelo}_"

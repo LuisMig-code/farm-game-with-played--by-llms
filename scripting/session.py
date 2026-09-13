@@ -16,6 +16,7 @@ Duas coisas exigem cuidado e explicam o desenho desta classe:
 """
 
 import logging
+from contextlib import contextmanager
 
 import pygame
 
@@ -44,6 +45,15 @@ MAX_DT = 0.05
 MAX_FRAMES = 3600
 
 
+def _max_game_dt() -> float:
+    """Maior passo de simulacao em que o jogador anda menos de uma celula.
+
+    O pixel de folga protege do arredondamento: com o deslocamento do quadro
+    exatamente igual a celula, uma sobra de 1e-14 ja emendaria outro passo.
+    """
+    return (settings.TILE - 1) / settings.PLAYER_SPEED
+
+
 class Session:
     """Uma partida dirigida por script.
 
@@ -53,16 +63,33 @@ class Session:
     """
 
     def __init__(self, seed: int | None = None, record: str | None = None,
-                 fps: int = settings.FPS, realtime: bool = True):
+                 fps: int = settings.FPS, realtime: bool = True, speed: float = 1.0):
+        if not 0 < speed <= self.max_speed(fps):
+            raise ValueError(f"speed deve ficar entre 0 e {self.max_speed(fps):.2f} a {fps} fps "
+                             f"(recebeu {speed})")
         self.game = Game(seed=seed)
         self.game.running = True          # nao chamamos run(): o laco e nosso
         self.fps = fps
         # Fora do tempo real cada quadro simula exatamente 1/fps sem esperar o
         # relogio: a partida anda tao rapido quanto o desenho deixar, e o video
-        # continua em tempo de jogo porque o gravador amostra pelo dt simulado.
+        # continua fluido porque o gravador amostra pelo dt do quadro, nao pelo relogio.
         self.realtime = realtime
+        # Cada quadro simula `speed` vezes o seu tempo: andar, animacoes e a
+        # transicao do sono ficam mais curtos, e o video junto. Regra nenhuma
+        # muda -- estamina, crescimento e precos contam passos e dias, nao segundos.
+        self.speed = speed
         self.recorder = Recorder(record) if record else None
-        logger.info("sessao de script iniciada | semente %s", self.game.seed)
+        logger.info("sessao de script iniciada | semente %s%s", self.game.seed,
+                    f" | velocidade {speed:g}x" if speed != 1 else "")
+
+    @staticmethod
+    def max_speed(fps: int = settings.FPS) -> float:
+        """Teto de `speed`: o jogador anda menos de uma celula por quadro.
+
+        Acima disso o passo termina com sobra no mesmo quadro em que comecou, e
+        com a direcao ainda ligada o jogo emendaria o passo seguinte.
+        """
+        return fps * _max_game_dt()
 
     # ------------------------------------------------------------ ciclo de vida
 
@@ -147,7 +174,9 @@ class Session:
         if not game.running:
             raise Aborted("a janela do jogo foi fechada")
 
-        game._update(dt)
+        # O jogo anda `speed` vezes o quadro; gravador e `breathe` seguem no dt
+        # do quadro. O teto so pesa em tempo real, num quadro que atrasou.
+        game._update(min(dt * self.speed, _max_game_dt()))
         game._draw()
         pygame.display.flip()
         if self.recorder is not None:
@@ -274,21 +303,38 @@ class Session:
             self.press(pygame.K_ESCAPE)
         return self
 
-    def _trade(self, kind: str, value: str, amount: int, o_que: str) -> None:
+    @contextmanager
+    def trading(self, kind: str):
+        """Fica no menu de vender ou de comprar ate o fim do bloco.
+
+        Cada `escolher(valor)` negocia uma unidade sem reabrir o menu. Entrar e
+        sair custam 4 quadros no total, entao um lote de 20 unidades cai de 100
+        quadros (abrindo e fechando a cada uma) para 24.
+
+        >>> with s.trading("vender") as escolher:
+        ...     escolher("batata")
+        ...     escolher("batata")
+        """
+        if kind not in (SELL_MENU, BUY_MENU):
+            raise Blocked(f"a loja so tem os menus '{SELL_MENU}' e '{BUY_MENU}', nao {kind!r}")
         self._require_playing()
         if self.cell != SHOP:
             raise Blocked(f"a loja fica em {SHOP}, e o jogador esta em {self.cell}")
-        if amount < 1:
-            raise Blocked(f"quantidade invalida para {o_que}: {amount}")
 
         self._open_here(SHOP_MENU)
         self._choose(kind, faltando=f"a loja nao ofereceu {kind}")   # vender/comprar
         self._expect(kind)
         try:
-            for _ in range(amount):
-                self._choose(value, faltando=f"a loja nao lista {value}")
+            yield lambda value: self._choose(value, faltando=f"a loja nao lista {value}")
         finally:
             self.leave_shop()
+
+    def _trade(self, kind: str, value: str, amount: int, o_que: str) -> None:
+        if amount < 1:
+            raise Blocked(f"quantidade invalida para {o_que}: {amount}")
+        with self.trading(kind) as escolher:
+            for _ in range(amount):
+                escolher(value)
 
     # ------------------------------------------------------------------ teclas
 

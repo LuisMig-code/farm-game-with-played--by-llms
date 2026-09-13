@@ -119,26 +119,87 @@ def crop_table(game=None, day: int = game_settings.FIRST_DAY) -> str:
     return "\n".join(linhas)
 
 
-def fertilizer_text() -> str:
+def fertilizer_text(game=None, horizon: int | None = None) -> str:
+    """Como o fertilizante funciona e o que o limita. Com `game`, soma os numeros de hoje."""
     g = game_settings
-    return (f"Custa {FERTILIZER_PRICE} moedas na loja. Numa planta AINDA CRESCENDO, tira dias do\n"
-            "crescimento e aumenta a validade (coluna \"fertilizada\" da tabela). Se o corte zerar\n"
-            f"o que falta, a planta fica pronta na hora. Máximo {g.FERTILIZERS_PER_DAY} por dia, 1 por "
-            f"planta. Carrega-se no máximo {ITEM_LIMITS[FERTILIZER]}. Custa {g.STAMINA_FERTILIZE} de "
-            "stamina aplicar.\nNão funciona em planta já pronta, nem no inverno.")
+    efeitos = []
+    for key, c in CROPS.items():
+        corte = f"-{c.fert_grow_cut} {'dia' if c.fert_grow_cut == 1 else 'dias'} para crescer"
+        efeitos.append(f"      {key} ".ljust(18, ".") + f" {corte}, +{c.fert_shelf_bonus} de validade")
+    sem_efeito = [s.label for s in seasons.SEASONS if not s.fertilizer_works]
+    linhas = [
+        "Como funciona:",
+        "  - Só age em planta AINDA CRESCENDO: nem pronta, nem podre.",
+        "  - Tira dias do crescimento e dá mais validade depois de pronta:",
+        *efeitos,
+        "    (a coluna \"fertilizada\" da tabela de cultivos já mostra o resultado)",
+        "  - O corte conta desde o plantio: se a planta já tem a idade do prazo novo,",
+        "    fica pronta na hora.",
+        "  - FERTILIZAR não escolhe cultivo: age nas plantas elegíveis mais próximas",
+        "    de você, no canteiro em que você está.",
+        "",
+        "Restrições:",
+        "  - 1 por planta: planta já fertilizada não recebe outro.",
+        f"  - No máximo {g.FERTILIZERS_PER_DAY} por dia; o contador zera ao dormir.",
+        *([f"  - NÃO funciona no {', '.join(sem_efeito)}."] if sem_efeito else []),
+        f"  - Aplicar custa {g.STAMINA_FERTILIZE} de stamina, fora o deslocamento.",
+        f"  - Carrega-se no máximo {ITEM_LIMITS[FERTILIZER]}. Preço base {FERTILIZER_PRICE} moedas; "
+        "a loja sorteia o estoque todo dia.",
+    ]
+    if game is not None:
+        linhas += ["", "Hoje:", *_fertilizer_today(game, horizon or game.day)]
+    return "\n".join(linhas)
+
+
+def _fertilizer_today(game, horizon: int) -> list[str]:
+    day, loja = game.day, game.market
+    restantes = max(0, game_settings.FERTILIZERS_PER_DAY - game.fertilizers_today)
+    linhas = [f"  - Você tem {game.inventory.count(FERTILIZER)}; o limite de hoje ainda permite "
+              f"usar {restantes}."]
+    estoque = loja.stock_left(FERTILIZER)
+    if estoque:
+        promo = f" PROMO (base {FERTILIZER_PRICE})" if loja.is_promo(FERTILIZER) else ""
+        linhas.append(f"  - Na loja: {loja.buy_price(FERTILIZER)} moedas{promo}, estoque {estoque}.")
+    else:
+        linhas.append("  - Na loja: esgotado hoje.")
+
+    funciona = seasons.season_at(day).fertilizer_works
+    virada = next((d for d in range(day + 1, horizon + 1)
+                   if seasons.season_at(d).fertilizer_works != funciona), None)
+    if funciona:
+        lucros = {k: loja.sell_price(k, day) - loja.buy_price(seed_key(k)) for k in CROPS}
+        melhor = max(lucros, key=lucros.get)
+        linhas.append(f"  - Para comparar: o maior lucro/ciclo de uma célula hoje é {lucros[melhor]} "
+                      f"moedas ({melhor}).")
+        linhas.append(f"  - Funciona hoje. Para de funcionar no dia {virada}, com o "
+                      f"{seasons.season_at(virada).label}." if virada
+                      else "  - Funciona hoje e até o fim da partida.")
+    else:
+        estacao = seasons.season_at(day).label
+        linhas.append(f"  - NÃO funciona hoje ({estacao}). Volta a funcionar no dia {virada}."
+                      if virada else f"  - NÃO funciona hoje ({estacao}) nem até o fim da partida.")
+    return linhas
 
 
 # -------------------------------------------------------------- estacoes
 
-def season_changes(season) -> list[str]:
+def season_changes(season, rot_note: str | None = None) -> list[str]:
+    """As regras da estacao que fogem do padrao.
+
+    `rot_note` entra logo depois de "NAO da para plantar": quem chama sabe se e
+    para falar da virada em geral ou com o dia marcado.
+    """
     mudancas = []
     if season.grow_delta:
-        mudancas.append(f"crescimento {season.grow_delta:+d} dia(s) para o que for plantado nela")
+        dias = "dia" if abs(season.grow_delta) == 1 else "dias"
+        mudancas.append(f"crescimento {season.grow_delta:+d} {dias} para o que for plantado nela")
     if season.shelf_days:
-        mudancas.append("validade menor: " + ", ".join(f"{c} {d}" for c, d in season.shelf_days.items()))
+        mudancas.append("validade menor para o que for plantado nela: "
+                        + ", ".join(f"{c} {d}" for c, d in season.shelf_days.items()))
     if not season.can_plant:
         mudancas.append("NÃO dá para plantar")
-        mudancas.append("na virada para ela, TUDO que estiver no chão apodrece na hora")
+        if rot_note:
+            mudancas.append(rot_note)
     if not season.fertilizer_works:
         mudancas.append("fertilizante NÃO funciona")
     if season.sell_multiplier:
@@ -146,7 +207,7 @@ def season_changes(season) -> list[str]:
             f"{c} x{m:g}" for c, m in season.sell_multiplier.items()))
     if season.daily_budget:
         mudancas.append(f"caixa da loja {season.daily_budget} moedas por dia")
-    return mudancas or ["ritmo padrão"]
+    return mudancas or ["sem restrições: crescimento, validade, preços e caixa base"]
 
 
 def seasons_block(horizon: int) -> str:
@@ -155,17 +216,52 @@ def seasons_block(horizon: int) -> str:
     for dia in range(game_settings.FIRST_DAY + 1, horizon + 2):
         if dia > horizon or seasons.season_at(dia) is not seasons.season_at(inicio):
             estacao = seasons.season_at(inicio)
-            trechos.append(f"  {estacao.label} (dias {inicio} a {dia - 1}): "
-                           + "; ".join(season_changes(estacao)))
+            regras = season_changes(
+                estacao, "na virada para ela, TUDO que estiver no chão apodrece na hora")
+            dias = f"dia {inicio}" if inicio == dia - 1 else f"dias {inicio} a {dia - 1}"
+            trechos.append(f"  {estacao.label} ({dias}): " + "; ".join(regras))
             inicio = dia
     return "\n".join(trechos)
 
 
-def season_line(day: int) -> str:
+def current_season_text(day: int) -> str:
+    estacao = seasons.season_at(day)
+    dia_nela = game_settings.SEASON_DAYS - seasons.days_to_next(day) + 1
+    return (f"{estacao.label} (dia {dia_nela} de {game_settings.SEASON_DAYS}) — "
+            + "; ".join(season_changes(estacao)))
+
+
+def next_season_text(day: int, horizon: int) -> str:
+    """A proxima estacao: quando comeca, quanto falta e o que ela restringe."""
     atual, proxima = seasons.season_at(day), seasons.season_after(day)
     faltam = seasons.days_to_next(day)
-    return (f"{atual.label} ({'; '.join(season_changes(atual))}). Vira {proxima.label} em "
-            f"{faltam} dia(s): {'; '.join(season_changes(proxima))}")
+    inicio = day + faltam
+    if inicio > horizon:
+        return (f"{proxima.label}, só no dia {inicio} — depois do fim da partida (dia {horizon}), "
+                "não afeta esta partida.")
+
+    quando = (f"a partir de AMANHÃ (dia {inicio})" if faltam == 1
+              else f"a partir do dia {inicio} — daqui a {faltam} dias")
+    apodrece = None
+    if atual.can_plant and not proxima.can_plant:
+        prazo = "HOJE" if faltam == 1 else f"até o dia {inicio - 1}"
+        apodrece = f"na virada para o dia {inicio}, TUDO que estiver no chão apodrece: colha {prazo}"
+    regras = season_changes(proxima, apodrece)
+    if proxima.can_plant:
+        if not atual.can_plant:
+            regras.append("volta a dar para plantar")
+        if atual.grow_delta and not proxima.grow_delta:
+            regras.append("crescimento volta ao normal para o que for plantado nela")
+        if atual.shelf_days and not proxima.shelf_days:
+            regras.append("validade volta ao normal para o que for plantado nela")
+        if (atual.grow_delta, atual.shelf_days) != (proxima.grow_delta, proxima.shelf_days):
+            # Field.timing congela o prazo no plantio: a virada nao mexe no que ja esta no chao.
+            regras.append("o que já estiver no chão na virada mantém o crescimento e a validade "
+                          "da estação em que foi plantado")
+    if proxima.fertilizer_works and not atual.fertilizer_works:
+        regras.append("fertilizante volta a funcionar")
+    return (f"{proxima.label}, {quando}. Restrições e mudanças:\n"
+            + "\n".join(f"  - {r}" for r in regras))
 
 
 # ------------------------------------------------------------------ loja
@@ -317,7 +413,9 @@ def day_values(game, *, horizon: int, strategy: str, feedback: str, diary: list[
     return {
         "DIAS": horizon, "DIA": day, "DIAS_RESTANTES": horizon - day,
         "ESTRATEGIA": strategy or "(sem estratégia: a chamada inicial não retornou)",
-        "ESTACAO": season_line(day),
+        "ESTACAO": current_season_text(day),
+        "PROXIMA_ESTACAO": next_season_text(day, horizon),
+        "FERTILIZANTE": fertilizer_text(game, horizon),
         "STAMINA": game.player.stamina,
         "MOEDAS": game.inventory.count(COIN),
         "COLHEITA": colheita, "SEMENTES": sementes, "FERTILIZANTES": fert,
@@ -349,6 +447,8 @@ def state_snapshot(game, horizon: int) -> dict:
         })
     return {
         "dia": day, "dias_restantes": horizon - day, "estacao": seasons.season_at(day).key,
+        "proxima_estacao": seasons.season_after(day).key,
+        "dias_ate_proxima_estacao": seasons.days_to_next(day),
         "estamina": game.player.stamina, "moedas": inv.count(COIN),
         "colheita": {k: inv.count(k) for k in CROPS},
         "sementes": {k: inv.count(seed_key(k)) for k in CROPS},

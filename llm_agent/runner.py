@@ -29,7 +29,7 @@ from llm_agent.executor import (CONTEXT, GRAMMAR, OK, PARTIAL, RESOURCE, TRUNCAT
 from llm_agent.openrouter import OK as HTTP_OK
 from llm_agent.openrouter import TIMEOUT, OpenRouterClient, load_api_key
 from llm_agent.parsing import ParseError, extract_json
-from llm_agent.run_logs import RunFolder, call_timing
+from llm_agent.run_logs import RunFolder, call_timing, publish_game_logs, slug
 from scripting import Aborted, Session
 
 logger = logging.getLogger(__name__)
@@ -49,23 +49,28 @@ class LLMRun:
     def __init__(self, *, seed: int | None = None, days: int = settings.DAYS,
                  model: str = settings.MODEL, mode: str = settings.MODE,
                  knowledge_path: Path | None = None, video: bool = settings.VIDEO,
-                 realtime: bool = settings.REALTIME,
+                 realtime: bool = settings.REALTIME, speed: float = settings.GAME_SPEED,
                  api_timeout: float = settings.API_TIMEOUT_SECONDS,
                  max_attempts: int = settings.API_MAX_ATTEMPTS,
                  retry_wait: float = settings.API_RETRY_WAIT_SECONDS,
-                 runs_dir: Path = settings.RUNS_DIR, client=None,
+                 runs_dir: Path = settings.RUNS_DIR,
+                 game_logs_dir: Path = settings.GAME_LOGS_DIR, client=None,
                  prompt_strategy: Path = settings.PROMPT_STRATEGY,
                  prompt_day: Path = settings.PROMPT_DAY):
         if mode not in settings.MODES:
             raise ValueError(f"modo invalido '{mode}' (validos: {', '.join(settings.MODES)})")
         if days < 1:
             raise ValueError("a run precisa de pelo menos 1 dia")
+        if not 0 < speed <= Session.max_speed():
+            raise ValueError(f"velocidade invalida {speed} (entre 0 e {Session.max_speed():.2f})")
 
         self.seed = farm_rng.resolve_seed(seed)
         self.days, self.model, self.mode = days, model, mode
-        self.video, self.realtime = video, realtime
+        self.video, self.realtime, self.speed = video, realtime, speed
         self.api_timeout, self.max_attempts, self.retry_wait = api_timeout, max_attempts, retry_wait
         self.runs_dir = Path(runs_dir)
+        self.game_logs_dir = Path(game_logs_dir)
+        self.game_logs_published: list[Path] = []
         self.prompt_strategy, self.prompt_day = Path(prompt_strategy), Path(prompt_day)
         self.knowledge_path = Path(knowledge_path) if knowledge_path else None
         self.knowledge_base = (self.knowledge_path.read_text(encoding="utf-8")
@@ -101,7 +106,7 @@ class LLMRun:
 
         interrompida, dia_final = None, 0
         try:
-            self.session = Session(seed=self.seed, realtime=self.realtime,
+            self.session = Session(seed=self.seed, realtime=self.realtime, speed=self.speed,
                                    record=self.folder.video if self.video else None)
             self.executor = Executor(self.session)
             self._write_config()
@@ -378,7 +383,8 @@ class LLMRun:
             "pasta": self.folder.name,
             "inicio": self.folder.started.isoformat(timespec="seconds"),
             "modelo": self.model, "modo": self.mode, "seed": self.seed, "dias": self.days,
-            "tempo_real": self.realtime, "video": self.video,
+            "tempo_real": self.realtime, "velocidade": self.speed, "video": self.video,
+            "logs_do_jogo_copiados_para": str(self.game_logs_dir),
             "janela": os.environ.get("SDL_VIDEODRIVER") != "dummy",
             "api_timeout_segundos": self.api_timeout, "tentativas_por_chamada": self.max_attempts,
             "temperatura": settings.TEMPERATURE, "reasoning_effort": settings.REASONING_EFFORT,
@@ -396,6 +402,7 @@ class LLMRun:
         no_chao = len(self.session.game.field.plots) if self.session else 0
         if self.session is not None:
             self.session.close()
+            self._publish_game_logs()
         f = self.folder
         trava = f.root / "travamentos.log"
         if trava.exists() and trava.stat().st_size == 0:
@@ -430,6 +437,22 @@ class LLMRun:
         f.close()
         return resumo
 
+    def _publish_game_logs(self) -> None:
+        """Copia os logs nativos para a pasta de logs do jogo, com o prefixo da IA.
+
+        Uma falha aqui nao pode derrubar o fim da run: o original segue em jogo/.
+        """
+        prefixo = settings.GAME_LOGS_PREFIX.format(modelo=slug(self.model))
+        try:
+            self.game_logs_published = publish_game_logs(self.session.game, self.game_logs_dir,
+                                                         prefixo)
+        except OSError as erro:
+            logger.warning("nao deu para copiar os logs do jogo para %s: %s",
+                           self.game_logs_dir, erro)
+            return
+        logger.info("logs do jogo copiados para %s: %s", self.game_logs_dir,
+                    ", ".join(p.name for p in self.game_logs_published))
+
 
 def _code_summary(execucao: DayExecution) -> str:
     contagem = Counter(r.code for r in execucao.results)
@@ -459,6 +482,8 @@ def _duracao(segundos) -> str:
 
 def _readme(r: dict, run: "LLMRun") -> str:
     video = "video.mp4" if run.video else "(sem video nesta run)"
+    publicados = "".join(f"| `{p.parent.name}/{p.name}` | copia dos logs do jogo, na pasta de logs "
+                         f"do jogo |\n" for p in run.game_logs_published)
     return f"""# Run {r['pasta']}
 
 | | |
@@ -466,6 +491,7 @@ def _readme(r: dict, run: "LLMRun") -> str:
 | Modelo | `{r['modelo']}` |
 | Modo | {r['modo']} |
 | Semente | {r['seed']} |
+| Velocidade das acoes | {run.speed:g}x |
 | Dias jogados | {r['dias_jogados']} de {r['horizonte']} |
 | **Moedas no fim** | **{r['moedas_fim']}** |
 | Estrategia | `{run.strategy or '(nenhuma)'}` |
@@ -496,6 +522,6 @@ def _readme(r: dict, run: "LLMRun") -> str:
 | `dias.csv` | uma linha por dia |
 | `erros_gramatica.csv` | todo comando fora da gramatica: sao pedidos de feature |
 | `jogo/` | os logs nativos do jogo (CSV e texto) |
-| `{video}` | a tela do jogo, em tempo de jogo |
+{publicados}| `{video}` | a tela do jogo, na velocidade da run |
 | `conhecimento_final.txt` | o bloco de conhecimento do ultimo dia, pronto para `--knowledge` |
 """

@@ -5,6 +5,7 @@
       <AAAA-MM-DD_HH-MM-SS>_<modelo>_<modo>_seed<N>/
         LEIAME.md  config.json  agente.log
         chamadas.csv  comandos.csv  dias.csv  erros_gramatica.csv
+        precos.csv  transacoes.csv
         estrategia/   dias/dia_001/ ...   jogo/   video.mp4
         conhecimento_final.txt
     logs/                                  a pasta de logs do jogo
@@ -23,6 +24,8 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
+from farm.crops import BUY_PRICES, CROPS
+
 CALLS_HEADER = ("dia", "tipo", "tentativa", "status", "inicio", "fim", "segundos",
                 "http_status", "finish_reason", "provedor", "tokens_in", "tokens_out",
                 "tokens_raciocinio", "custo_usd", "erro")
@@ -39,6 +42,11 @@ DAYS_HEADER = (
     "tokens_out", "custo_usd",
 )
 GRAMMAR_HEADER = ("dia", "ordem", "comando", "erro")
+# Precos do comeco de cada dia: compra de cada item da loja e venda de cada cultivo.
+PRICES_HEADER = ("dia", "estacao", *(f"compra_{item.replace(' ', '_')}" for item in BUY_PRICES),
+                 *(f"venda_{crop}" for crop in CROPS))
+TRANSACTIONS_HEADER = ("dia", "tipo", "item", "quantidade", "preco_min", "preco_max",
+                       "total_moedas", "moedas_depois")
 SUMMARY_HEADER = ("pasta", "inicio", "fim", "modelo", "modo", "seed", "dias_jogados",
                   "horizonte", "moedas_fim", "dias_perdidos", "dias_timeout", "dias_truncados",
                   "no_chao_no_fim", "canteiros_usados", "erros_gramatica", "erros_contexto",
@@ -142,6 +150,8 @@ class RunFolder:
         self.commands = _Csv(self.root / "comandos.csv", COMMANDS_HEADER)
         self.days = _Csv(self.root / "dias.csv", DAYS_HEADER)
         self.grammar_errors = _Csv(self.root / "erros_gramatica.csv", GRAMMAR_HEADER)
+        self.prices = _Csv(self.root / "precos.csv", PRICES_HEADER)
+        self.transactions = _Csv(self.root / "transacoes.csv", TRANSACTIONS_HEADER)
 
         self._handler = logging.FileHandler(self.root / "agente.log", encoding="utf-8")
         self._handler.setFormatter(logging.Formatter(LOG_FORMAT))
@@ -224,7 +234,8 @@ class RunFolder:
         resumo.close()
 
     def close(self) -> None:
-        for arquivo in (self.calls, self.commands, self.days, self.grammar_errors):
+        for arquivo in (self.calls, self.commands, self.days, self.grammar_errors, self.prices,
+                        self.transactions):
             arquivo.close()
         logging.getLogger().removeHandler(self._handler)
         self._handler.close()

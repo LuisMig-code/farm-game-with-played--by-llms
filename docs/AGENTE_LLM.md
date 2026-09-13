@@ -182,6 +182,8 @@ runs_llm/
     comandos.csv             uma linha por comando do plano, com o código do resultado
     dias.csv                 uma linha por dia
     erros_gramatica.csv      todo comando fora da gramática: pedidos de feature
+    precos.csv               uma linha por dia: preço de compra de cada item e de venda de cada cultivo
+    transacoes.csv           uma linha por compra ou venda que o jogador fez no jogo
     estrategia/
       prompt.txt             o prompt renderizado (system + user)
       resposta_1.txt         resposta bruta + raciocínio
@@ -212,6 +214,19 @@ interrompida), porque o jogo só solta os arquivos quando a sessão fecha; os or
 `jogo/`. O histórico de células estragadas, que o jogo acumula entre partidas em
 `logs/celulas_estragadas.csv`, aqui é acumulado por modelo — as partidas da IA não entram no
 histórico das humanas. O destino é `GAME_LOGS_DIR`, e o prefixo, `GAME_LOGS_PREFIX`.
+
+**A economia da run** fica em dois CSVs:
+
+- `precos.csv` — uma linha por dia com os preços do **começo do dia**, os mesmos do prompt:
+  `compra_semente_<cultivo>` e `compra_fertilizante` (já com promoção) e `venda_<cultivo>` (já com
+  a estação e a saturação). Durante o dia a venda ainda pode cair com a saturação; o preço de cada
+  unidade vendida está em `transacoes.csv`.
+- `transacoes.csv` — `dia, tipo, item, quantidade, preco_min, preco_max, total_moedas,
+  moedas_depois`. Sai do **registro do próprio jogo**, não do plano: só entra o que o jogador de
+  fato comprou ou vendeu. Unidades seguidas da mesma operação e do mesmo item são uma transação;
+  qualquer outra ação registrada pelo jogo a fecha — andar, plantar, dormir, negociar outro item,
+  sair da loja. Vender 5 batatas, sair e voltar para vender 17 dá duas linhas; comprar sementes de
+  3 cultivos dá três. Nas compras, `item` é o cultivo da semente (ou `fertilizante`).
 
 `dias.csv`, uma linha por dia: moedas, contagem de cada código, se truncou, stamina gasta e
 decomposta (andando, plantando, colhendo, fertilizando, limpando), canteiros visitados, vendas,

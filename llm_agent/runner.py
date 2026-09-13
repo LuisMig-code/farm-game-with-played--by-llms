@@ -23,6 +23,7 @@ from pathlib import Path
 
 from farm import rng as farm_rng
 from farm import seasons, settings as game_settings
+from farm.crops import BUY_PRICES, CROPS
 from llm_agent import facts, feedback, responses, settings, templates
 from llm_agent.executor import (CONTEXT, GRAMMAR, OK, PARTIAL, RESOURCE, TRUNCATED, DayExecution,
                                 Executor)
@@ -30,6 +31,7 @@ from llm_agent.openrouter import OK as HTTP_OK
 from llm_agent.openrouter import TIMEOUT, OpenRouterClient, load_api_key
 from llm_agent.parsing import ParseError, extract_json
 from llm_agent.run_logs import RunFolder, call_timing, publish_game_logs, slug
+from llm_agent.transactions import Transaction, TransactionLog
 from scripting import Aborted, Session
 
 logger = logging.getLogger(__name__)
@@ -79,6 +81,7 @@ class LLMRun:
             model=model, api_key=load_api_key(), timeout=api_timeout, seed=self.seed)
 
         self.session: Session | None = None
+        self.transactions: TransactionLog | None = None
         self.folder: RunFolder | None = None
         self.strategy = ""
         self.knowledge: list[str] = []
@@ -108,6 +111,8 @@ class LLMRun:
         try:
             self.session = Session(seed=self.seed, realtime=self.realtime, speed=self.speed,
                                    record=self.folder.video if self.video else None)
+            # Cada compra e venda que o jogo registrar vira linha em transacoes.csv na hora.
+            self.transactions = TransactionLog(self.session.game, self._write_transaction)
             self.executor = Executor(self.session)
             self._write_config()
             self._strategy()
@@ -179,7 +184,12 @@ class LLMRun:
             memory=memoria, last_sold=self.last_sold)
         prompt = templates.render(self.prompt_day, valores)
         self.folder.prompt_text(rel / "prompt.txt", prompt)
-        self.folder.json(rel / "estado.json", facts.state_snapshot(game, self.days))
+        estado = facts.state_snapshot(game, self.days)
+        self.folder.json(rel / "estado.json", estado)
+        # Os precos do comeco do dia, os mesmos do prompt e do estado.json.
+        self.folder.prices.row([dia, estado["estacao"],
+                                *(estado["precos_compra"][item] for item in BUY_PRICES),
+                                *(estado["precos_venda"][crop] for crop in CROPS)])
 
         out = self._call(prompt.messages(), dia, "dia", rel / "resposta",
                          responses.DAY_KEYS, responses.day_problem)
@@ -400,6 +410,8 @@ class LLMRun:
     def _finish(self, dia_final: int, interrompida: str | None) -> dict:
         moedas = self.session.coins if self.session else 0
         no_chao = len(self.session.game.field.plots) if self.session else 0
+        if self.transactions is not None:
+            self.transactions.flush()          # antes de a pasta fechar os CSVs
         if self.session is not None:
             self.session.close()
             self._publish_game_logs()
@@ -436,6 +448,10 @@ class LLMRun:
                     interrompida or "completa")
         f.close()
         return resumo
+
+    def _write_transaction(self, t: Transaction) -> None:
+        self.folder.transactions.row([t.day, t.kind, t.item, t.quantity, t.price_min, t.price_max,
+                                      t.total, t.coins_after])
 
     def _publish_game_logs(self) -> None:
         """Copia os logs nativos para a pasta de logs do jogo, com o prefixo da IA.
@@ -521,6 +537,8 @@ def _readme(r: dict, run: "LLMRun") -> str:
 | `comandos.csv` | uma linha por comando do plano, com o codigo do resultado |
 | `dias.csv` | uma linha por dia |
 | `erros_gramatica.csv` | todo comando fora da gramatica: sao pedidos de feature |
+| `precos.csv` | uma linha por dia: precos de compra e de venda no comeco do dia |
+| `transacoes.csv` | uma linha por compra ou venda que o jogador fez no jogo |
 | `jogo/` | os logs nativos do jogo (CSV e texto) |
 {publicados}| `{video}` | a tela do jogo, na velocidade da run |
 | `conhecimento_final.txt` | o bloco de conhecimento do ultimo dia, pronto para `--knowledge` |

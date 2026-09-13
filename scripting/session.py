@@ -53,10 +53,14 @@ class Session:
     """
 
     def __init__(self, seed: int | None = None, record: str | None = None,
-                 fps: int = settings.FPS):
+                 fps: int = settings.FPS, realtime: bool = True):
         self.game = Game(seed=seed)
         self.game.running = True          # nao chamamos run(): o laco e nosso
         self.fps = fps
+        # Fora do tempo real cada quadro simula exatamente 1/fps sem esperar o
+        # relogio: a partida anda tao rapido quanto o desenho deixar, e o video
+        # continua em tempo de jogo porque o gravador amostra pelo dt simulado.
+        self.realtime = realtime
         self.recorder = Recorder(record) if record else None
         logger.info("sessao de script iniciada | semente %s", self.game.seed)
 
@@ -134,7 +138,11 @@ class Session:
         # sem editar farm/game.py.
         game._input_direction = lambda d=pygame.Vector2(direction): d
 
-        dt = min(game.clock.tick(self.fps) / 1000.0, MAX_DT)
+        if self.realtime:
+            dt = min(game.clock.tick(self.fps) / 1000.0, MAX_DT)
+        else:
+            game.clock.tick()
+            dt = 1.0 / self.fps
         game._handle_events()
         if not game.running:
             raise Aborted("a janela do jogo foi fechada")

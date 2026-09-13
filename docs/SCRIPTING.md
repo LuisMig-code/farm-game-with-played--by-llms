@@ -33,21 +33,33 @@ escolhe uma ação e trata a recusa. Trocar a função `decide()` por uma chamad
 
 ## A `Session`
 
-`Session(seed=None, record=None, fps=60)`. A `seed` é a mesma de
+`Session(seed=None, record=None, fps=60, realtime=True, speed=1.0)`. A `seed` é a mesma de
 [SEMENTE.md](SEMENTE.md): mesma semente, mesmo estoque e mesma promoção em cada dia. `record` é o
-caminho do MP4; sem ele, nada é gravado.
+caminho do MP4; sem ele, nada é gravado. `realtime` e `speed` estão em [Ritmo](#ritmo-e-a-janela).
 
 | Grupo | Métodos |
 | --- | --- |
 | Movimento | `walk_to(cell)`, `step(direction)` |
 | Campo | `plant(crop)`, `harvest()`, `fertilize()`, `clear()` |
-| Casa e loja | `sleep()`, `sleep_until(day)`, `sell(crop, n=1)`, `buy(item, n=1)`, `leave_shop()` |
+| Casa e loja | `sleep()`, `sleep_until(day)`, `sell(crop, n=1)`, `buy(item, n=1)`, `trading(kind)`, `leave_shop()` |
 | Estado | `observe()`, `day`, `cell`, `stamina`, `coins`, `over`, `stats`, `count(item)` |
-| Baixo nível | `press(key)`, `tick(frames, direction)`, `breathe(seconds)`, `game` |
+| Baixo nível | `press(key)`, `tick(frames, direction)`, `breathe(seconds)`, `game`, `max_speed(fps)` |
 
 Todo método de ação **bloqueia até a ação terminar de verdade**: plantar e colher só têm efeito
-quando a animação de 0,5 s acaba, e dormir tem 0,6 s de transição. Quando a chamada retorna, o
-inventário e o campo já mudaram.
+quando a animação de 0,5 s acaba, e dormir tem 0,6 s de transição (metade disso com `speed=2`).
+Quando a chamada retorna, o inventário e o campo já mudaram.
+
+`sell` e `buy` abrem a loja, negociam `n` unidades e fecham. Para decidir unidade a unidade sem
+reabrir o menu — conferindo preço, caixa ou estoque entre uma e outra — use `trading`:
+
+```python
+with s.trading("vender") as escolher:      # ou "comprar"
+    while s.count("batata") and s.game.market.can_sell("batata", s.day):
+        escolher("batata")
+```
+
+Entrar e sair da loja custam 4 quadros no total e cada unidade 1, então vender 8 leva 12 quadros
+em vez dos 40 de oito `sell(crop, 1)`.
 
 Os métodos de ação devolvem a própria sessão, então dá para encadear: `s.walk_to(HOUSE).sleep()`.
 
@@ -150,6 +162,18 @@ viva.
 
 **O passo de simulação é limitado a 50 ms.** Sem essa trava, o tempo acumulado durante a pausa
 entraria de uma vez no quadro seguinte e o jogador atravessaria meia dezena de células de um salto.
+
+**`realtime=False` não espera o relógio.** Cada quadro simula exatamente `1/fps` e o próximo começa
+assim que o desenho termina: a partida roda tão rápido quanto a máquina deixa, e o vídeo continua
+certo porque o gravador amostra pelo tempo simulado. É o modo dos agentes LLM.
+
+**`speed` acelera as ações.** Cada quadro passa `speed` vezes o seu tempo para o jogo: com `speed=2`,
+um passo leva 4 quadros em vez de 8, plantar 17 em vez de 32, dormir 18 em vez de 36 — e o vídeo
+mostra tudo no dobro da velocidade. Nenhuma regra muda: estamina, crescimento e preços contam passos
+e dias, não segundos, então a mesma partida a 1 e a 2 termina igual. Navegar no menu continua
+custando 1 quadro por tecla. O teto é `Session.max_speed(fps)` (~7,4 a 60 fps): acima dele o
+jogador andaria uma célula inteira num quadro e o passo emendaria no seguinte, então o construtor
+recusa.
 
 Para rodar sem janela — em teste ou em lote — basta o driver nulo do SDL antes de importar o
 pygame, o mesmo que as suítes do projeto usam:

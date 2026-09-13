@@ -33,6 +33,9 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--no-video", action="store_true", help="nao gravar o MP4")
     p.add_argument("--realtime", action="store_true",
                    help="roda a 60 fps de verdade em vez de acelerado")
+    p.add_argument("--speed", type=float, default=settings.GAME_SPEED,
+                   help="velocidade das acoes na tela (andar, plantar, colher, dormir): 1 = a do "
+                        f"jogo (padrao {settings.GAME_SPEED:g})")
     p.add_argument("--headless", action="store_true",
                    help="sem janela (o video e gravado igual); o mais estavel para runs longas")
     p.add_argument("--allow-sleep", action="store_true",
@@ -78,7 +81,7 @@ def main(argv=None) -> int:
     from llm_agent.runner import LLMRun       # importa pygame so depois dos argumentos
     resumo = LLMRun(seed=args.seed, days=args.days, model=args.model, mode=args.mode,
                     knowledge_path=args.knowledge, video=not args.no_video,
-                    realtime=args.realtime, api_timeout=args.timeout,
+                    realtime=args.realtime, speed=args.speed, api_timeout=args.timeout,
                     max_attempts=args.attempts, runs_dir=args.runs_dir).run()
 
     print()

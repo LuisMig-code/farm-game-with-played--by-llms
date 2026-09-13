@@ -29,6 +29,7 @@ A chave nunca é gravada.
 | `--headless` | — | sem janela; o vídeo é gravado igual. O mais estável para runs longas |
 | `--no-video` | — | não grava o MP4 |
 | `--realtime` | — | roda a 60 fps de verdade em vez de acelerado |
+| `--speed` | 2 | velocidade das ações na tela: andar, plantar, colher, fertilizar, limpar, dormir. 1 = a do jogo |
 | `--allow-sleep` | — | deixa o Windows suspender por inatividade durante a run |
 | `--runs-dir` | `runs_llm/` | onde criar a pasta da run |
 
@@ -36,6 +37,28 @@ Os padrões moram em [`llm_agent/settings.py`](../llm_agent/settings.py), separa
 `farm/settings.py` para o jogo continuar intocado. Lá também ficam `TEMPERATURE` (não enviada por
 padrão: o `gpt-5.6-luna` não lista o parâmetro), `REASONING_EFFORT` e `RESPONSE_FORMAT_JSON`, que
 pede JSON de verdade ao provedor.
+
+## Velocidade
+
+`GAME_SPEED` (padrão 2, ou `--speed`) multiplica o tempo de jogo de cada quadro: passo, animação de
+plantar/colher/fertilizar/limpar e a transição do sono levam metade dos quadros, e o vídeo fica com
+metade da duração. **Nenhuma regra muda** — estamina, crescimento e preços contam passos e dias,
+não segundos; uma run a 1 e outra a 2 produzem `comandos.csv` idênticos. A loja também ficou mais
+curta: cada `COMPRAR`/`VENDER` abre o menu uma vez para o lote inteiro, em vez de uma vez por
+unidade.
+
+| Ação (quadros a 60 fps) | Velocidade 1, loja unidade por unidade | Velocidade 2, loja em lote |
+| --- | --- | --- |
+| passo | 8 | 4 |
+| plantar / fertilizar | 32 | 17 |
+| colher / limpar | 31 | 16 |
+| dormir | 36 | 18 |
+| vender 8 unidades | 40 | 12 |
+| comprar ou vender 1 unidade | 5 | 5 |
+
+A última linha é a exceção: navegar no menu é uma tecla por quadro, e a velocidade não mexe nisso.
+O teto é `Session.max_speed()` (~7,4 a 60 fps): acima dele o jogador andaria uma célula inteira num
+quadro e o passo emendaria no seguinte. Ver [SCRIPTING.md](SCRIPTING.md).
 
 ## Os prompts são arquivos
 
@@ -115,6 +138,15 @@ curadoria; linhas acima dele são cortadas e o corte é avisado no feedback.
 preços do dia, pedágio de cada viagem, células livres, estado de cada plantio, a decomposição da
 stamina de ontem. O prompt diz que, quando um número contradiz o conhecimento, o número ganha.
 
+Dois blocos do prompt diário existem para o modelo não ser pego de surpresa:
+
+- **Próxima estação**, em "ONDE VOCÊ ESTÁ": qual é, em que dia começa, quantos dias faltam e o que
+  ela restringe — no inverno, o dia limite para colher antes de tudo apodrecer; nas outras viradas,
+  o lembrete de que o que já está no chão mantém as regras da estação em que foi plantado.
+- **Fertilizante**, logo depois do prazo: o efeito por cultivo, as restrições (1 por planta, 3 por
+  dia, não funciona no inverno, stamina, limite de 9) e os números de hoje (quantos tem, quantos
+  ainda pode usar, preço e estoque na loja, e em que dia para ou volta a funcionar).
+
 **A ordem do output importa.** `leitura_do_dia` → `conhecimento` → `plano`: o plano sai condicionado
 à reflexão recém-escrita.
 
@@ -165,9 +197,21 @@ runs_llm/
       conhecimento.md        o bloco ao fim do dia, com linhas novas e removidas
       chamadas.json          tempo de cada chamada e da execução do jogo
     jogo/                    os logs nativos do jogo (CSV e texto)
-    video.mp4
+    video.mp4                a tela do jogo, na velocidade da run
     conhecimento_final.txt   pronto para --knowledge numa próxima run
+
+logs/                                               a pasta de logs do jogo
+  IA_gpt-5.6-luna_run_<id>_semente42_<data>.log     cópia do .log de jogo/, ao fim da run
+  IA_gpt-5.6-luna_run_<id>_semente42_<data>.csv     cópia do .csv de jogo/
+  IA_gpt-5.6-luna_celulas_estragadas.csv            células estragadas, acumuladas por modelo
 ```
+
+Os logs nativos também vão para `logs/`, junto dos das partidas jogadas por gente, e o prefixo
+`IA_<modelo>_` separa uns dos outros. A cópia acontece ao fim da run (inclusive se ela for
+interrompida), porque o jogo só solta os arquivos quando a sessão fecha; os originais continuam em
+`jogo/`. O histórico de células estragadas, que o jogo acumula entre partidas em
+`logs/celulas_estragadas.csv`, aqui é acumulado por modelo — as partidas da IA não entram no
+histórico das humanas. O destino é `GAME_LOGS_DIR`, e o prefixo, `GAME_LOGS_PREFIX`.
 
 `dias.csv`, uma linha por dia: moedas, contagem de cada código, se truncou, stamina gasta e
 decomposta (andando, plantando, colhendo, fertilizando, limpando), canteiros visitados, vendas,

@@ -7,6 +7,9 @@
         chamadas.csv  comandos.csv  dias.csv  erros_gramatica.csv
         estrategia/   dias/dia_001/ ...   jogo/   video.mp4
         conhecimento_final.txt
+    logs/                                  a pasta de logs do jogo
+      IA_<modelo>_run_<id>_semente<N>_<data>.log / .csv   copia do que esta em jogo/
+      IA_<modelo>_celulas_estragadas.csv                 acumulado por modelo
 
 O nome da pasta ordena cronologicamente e diz modelo, modo e semente. Todo CSV e
 gravado com flush por linha: uma run interrompida no meio continua legivel.
@@ -16,6 +19,7 @@ import csv
 import json
 import logging
 import re
+import shutil
 from datetime import datetime
 from pathlib import Path
 
@@ -53,6 +57,36 @@ def slug(texto: str) -> str:
 
 def _hora(momento: datetime | None) -> str:
     return momento.isoformat(sep=" ", timespec="seconds") if momento else ""
+
+
+def publish_game_logs(game, dest: Path, prefix: str) -> list[Path]:
+    """Copia os logs nativos da partida para a pasta de logs do jogo, com prefixo.
+
+    Na run eles continuam em jogo/, com o nome que o jogo deu. Em `dest` o prefixo
+    separa a partida jogada por IA das jogadas por gente. O historico de celulas
+    estragadas, que o jogo acumula entre partidas, aqui e acumulado por modelo.
+    Chame depois de fechar a sessao, para as ultimas linhas ja estarem gravadas.
+    """
+    dest.mkdir(parents=True, exist_ok=True)
+    publicados = []
+    for origem in (game.run_log.text_path, game.run_log.csv_path):
+        if origem.is_file():
+            publicados.append(Path(shutil.copy2(origem, dest / f"{prefix}{origem.name}")))
+
+    estragadas = game.spoiled_cells.path
+    if estragadas.is_file():
+        with estragadas.open(newline="", encoding="utf-8") as f:
+            cabecalho, *linhas = list(csv.reader(f)) or [[]]
+        if linhas:
+            acumulado = dest / f"{prefix}{estragadas.name}"
+            novo = not acumulado.exists()
+            with acumulado.open("a", newline="", encoding="utf-8") as f:
+                escritor = csv.writer(f)
+                if novo:
+                    escritor.writerow(cabecalho)
+                escritor.writerows(linhas)
+            publicados.append(acumulado)
+    return publicados
 
 
 def call_timing(kind: str, attempt: int, result) -> dict:

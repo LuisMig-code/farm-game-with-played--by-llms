@@ -18,9 +18,11 @@ sem texto antes ou depois.
 ## ONDE VOCÊ ESTÁ
 
 Dia {DIA} de {DIAS}.  Restam {DIAS_RESTANTES} dias depois de hoje.
-Estação: {ESTACAO}.
 Stamina: {STAMINA} (recarregada). Posição: cama.
 Moedas: {MOEDAS}
+
+Estação atual: {ESTACAO}
+Próxima estação: {PROXIMA_ESTACAO}
 
 Inventário — colheita:      {COLHEITA}
 Inventário — sementes:      {SEMENTES}
@@ -51,6 +53,10 @@ canteiro_direito — {LIVRES_DIR} livres de 49
 Cultivos que NÃO amadurecem mais a tempo: {CULTIVOS_INVIAVEIS}
 
 {TABELA_CULTIVOS}
+
+## FERTILIZANTE
+
+{FERTILIZANTE}
 
 ## O QUE ACONTECEU ONTEM
 
@@ -87,7 +93,8 @@ Regras de execução:
   funcionam em `loja`. Vender ANTES de comprar, ou não haverá moedas.
 - COLHER sem LIMITE colhe tudo que estiver pronto no canteiro.
 - PLANTAR ... TUDO planta enquanto houver semente e célula livre.
-- FERTILIZAR age sobre plantas ainda crescendo e não fertilizadas.
+- FERTILIZAR age sobre plantas ainda crescendo e não fertilizadas (ver
+  FERTILIZANTE acima).
 - LIMPAR arranca plantas podres (não rende nada, libera a célula).
 - Comandos toleram execução parcial: o que der, é feito; o resto segue.
 - Um comando inválido é descartado e os outros seguem; o erro volta amanhã.

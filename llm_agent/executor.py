@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 
 from farm import seasons, settings as game_settings
 from farm.crops import COIN, FERTILIZER, seed_key
+from farm.game import BUY_MENU, SELL_MENU
 from llm_agent import settings
 from llm_agent.grammar import (FIELD_VERBS, PLOT_ZONES, SHOP_VERBS, STORE, ZONE_CELLS,
                                Command, GrammarError, parse, plot_zone_of)
@@ -354,25 +355,19 @@ class Executor:
     def _buy(self, c: Command, r: CommandResult) -> None:
         game, nome = self.s.game, ("fertilizantes" if c.item == FERTILIZER
                                    else f"sementes de {c.crop}")
-        r.requested, feitos, motivo = c.amount, 0, None
-        while feitos < c.amount:
-            loja, inv = game.market, game.inventory
-            preco = loja.buy_price(c.item)
-            if loja.stock_left(c.item) == 0:
-                motivo = "o estoque da loja acabou"
-            elif inv.is_full(c.item):
-                motivo = f"o limite de {inv.limit_for(c.item)} no inventário"
-            elif inv.count(COIN) < preco:
-                motivo = f"{inv.count(COIN)} moedas não pagam mais uma a {preco}"
-            if motivo:
-                break
+        r.requested, feitos = c.amount, 0
+        motivo = self._buy_blocker(c)
+        if motivo is None:
             try:
-                self.s.buy(c.item, 1)
+                # Uma visita ao menu para o comando inteiro, nao uma por unidade.
+                with self.s.trading(BUY_MENU) as escolher:
+                    while feitos < c.amount and (motivo := self._buy_blocker(c)) is None:
+                        preco = game.market.buy_price(c.item)
+                        escolher(c.item)
+                        r.coins -= preco
+                        feitos += 1
             except Blocked as erro:
                 motivo = f"o jogo recusou: {erro}"
-                break
-            r.coins -= preco
-            feitos += 1
         r.effective = feitos
         if feitos == c.amount:
             r.detail = f"{feitos} {nome} -> {-r.coins} moedas"
@@ -381,6 +376,18 @@ class Executor:
         else:
             r.code, r.detail = PARTIAL, f"comprou {feitos} de {c.amount} ({-r.coins} moedas): {motivo}"
 
+    def _buy_blocker(self, c: Command) -> str | None:
+        """Por que a proxima unidade nao pode ser comprada, ou None se pode."""
+        loja, inv = self.s.game.market, self.s.game.inventory
+        preco = loja.buy_price(c.item)
+        if loja.stock_left(c.item) == 0:
+            return "o estoque da loja acabou"
+        if inv.is_full(c.item):
+            return f"o limite de {inv.limit_for(c.item)} no inventário"
+        if inv.count(COIN) < preco:
+            return f"{inv.count(COIN)} moedas não pagam mais uma a {preco}"
+        return None
+
     def _sell(self, c: Command, r: CommandResult) -> None:
         game = self.s.game
         tem = game.inventory.count(c.crop)
@@ -388,24 +395,21 @@ class Executor:
         if tem == 0:
             r.code, r.effective, r.detail = RESOURCE, 0, f"0 unidades de {c.crop} na mochila"
             return
-        feitos, motivo = 0, None
-        while feitos < r.requested:
-            loja, dia = game.market, self.s.day
-            if game.inventory.count(c.crop) == 0:
-                motivo = f"só havia {tem} na mochila"
-                break
-            if not loja.can_sell(c.crop, dia):
-                motivo = f"o caixa da loja acabou ({loja.budget_left(dia)} moedas)"
-                break
-            preco, base = loja.sell_price(c.crop, dia), loja.base_price(c.crop, dia)
+        feitos = 0
+        motivo = self._sell_blocker(c, tem)
+        if motivo is None:
             try:
-                self.s.sell(c.crop, 1)
+                # Uma visita ao menu para o comando inteiro, nao uma por unidade.
+                with self.s.trading(SELL_MENU) as escolher:
+                    while feitos < r.requested and (motivo := self._sell_blocker(c, tem)) is None:
+                        loja, dia = game.market, self.s.day
+                        preco, base = loja.sell_price(c.crop, dia), loja.base_price(c.crop, dia)
+                        escolher(c.crop)
+                        r.coins += preco
+                        r.below_base += preco < base
+                        feitos += 1
             except Blocked as erro:
                 motivo = f"o jogo recusou: {erro}"
-                break
-            r.coins += preco
-            r.below_base += preco < base
-            feitos += 1
         r.effective = feitos
         if feitos == r.requested:
             r.detail = f"{feitos} un -> {r.coins} moedas"
@@ -413,6 +417,15 @@ class Executor:
             r.code, r.detail = RESOURCE, f"não vendeu nenhuma: {motivo}"
         else:
             r.code, r.detail = PARTIAL, f"vendeu {feitos} de {r.requested} ({r.coins} moedas): {motivo}"
+
+    def _sell_blocker(self, c: Command, tinha: int) -> str | None:
+        """Por que a proxima unidade nao pode ser vendida, ou None se pode."""
+        game, dia = self.s.game, self.s.day
+        if game.inventory.count(c.crop) == 0:
+            return f"só havia {tinha} na mochila"
+        if not game.market.can_sell(c.crop, dia):
+            return f"o caixa da loja acabou ({game.market.budget_left(dia)} moedas)"
+        return None
 
 
 def _n(n: int, singular: str, plural: str) -> str:

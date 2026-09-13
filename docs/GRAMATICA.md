@@ -1,143 +1,124 @@
 # Gramática do plano diário
 
-O modelo não aperta teclas: a cada dia ele devolve um **plano**, uma lista de linhas nesta
-gramática, e o executor joga o plano no jogo de verdade. Implementação em
-[`llm_agent/grammar.py`](../llm_agent/grammar.py); o texto que vai no prompt é gerado das mesmas
-constantes, então os dois nunca discordam.
+Especificação da DSL que o LLM emite e que o interpretador (`llm_agent/executor.py`) traduz em ações
+do jogo. Segue a lógica do Projeto Fazenda, estendida com o que este jogo tem a mais:
+fertilizante, apodrecimento e compra de fertilizante.
 
-## Resposta do modelo
+O princípio que organiza tudo: **o LLM decide, o interpretador conta.** Escolha de cultivo,
+quantidade comprada, qual canteiro e ordem das paradas são julgamento — ficam com o modelo.
+Caminho, contagem de células, controle de stamina e sobrevivência são aritmética — ficam com o
+código.
 
-```json
-{
-  "raciocinio": "texto curto, até 800 caracteres",
-  "plano": ["IR loja", "VENDER trigo TUDO", "IR canteiro_esquerdo", "COLHER TUDO"],
-  "caderno": ["[REGRA] ...", "[NUMERO] ..."]
-}
+---
+
+## 1. Forma dos comandos
+
+```
+<comando> ::= IR <zona>
+            | COLHER [LIMITE <n>]
+            | PLANTAR <cultivo> (TUDO | LIMITE <n>)
+            | FERTILIZAR [LIMITE <n>]
+            | LIMPAR [LIMITE <n>]
+            | COMPRAR (<cultivo> | fertilizante) <n>
+            | VENDER <cultivo> (TUDO | <n>)
 ```
 
-A chamada de estratégia, antes do dia 1, devolve `{"estrategia": "...", "caderno": [...]}`.
+Um comando por elemento do array `plano`. Sem prosa, sem numeração, sem coordenada.
 
-O modelo configurado não aceita JSON forçado, então o parser procura o objeto no texto: puro,
-dentro de uma cerca ` ```json `, ou cercado de texto — e, se a resposta vier vazia, também no
-raciocínio.
-
-## Vocabulário
-
-| Categoria | Valores |
+| Categoria | Valores válidos |
 | --- | --- |
 | Verbos | `IR` `COLHER` `PLANTAR` `FERTILIZAR` `LIMPAR` `COMPRAR` `VENDER` |
 | Zonas | `cama` `loja` `canteiro_esquerdo` `canteiro_direito` |
 | Cultivos | `cenoura` `batata` `beterraba` `trigo` `melancia` |
-| Itens de compra | `semente_cenoura` `semente_batata` `semente_beterraba` `semente_trigo` `semente_melancia` `fertilizante` |
-| Quantificadores | `TUDO` · `LIMITE <n>` · `<n>` |
+| Quantificadores | `TUDO` · `LIMITE <n>` |
 
-Maiúsculas e minúsculas são aceitas: o que se mede é se o modelo entende as regras, não a caixa
-das letras. Qualquer outro token é `ERRO_GRAMATICA`.
+Maiúsculas e minúsculas são aceitas. Qualquer outro token é `ERRO_GRAMATICA`.
 
-## Assinaturas
+```json
+["IR loja", "VENDER trigo TUDO", "COMPRAR trigo 12",
+ "IR canteiro_esquerdo", "COLHER", "PLANTAR trigo TUDO"]
+```
 
-| Ação | Onde | O que faz |
-| --- | --- | --- |
-| `IR <zona>` | — | anda até a zona; em canteiro, até a célula de entrada |
-| `COLHER <cultivo\|TUDO> [LIMITE n]` | canteiro | colhe plantas prontas e não estragadas |
-| `PLANTAR <cultivo> <TUDO\|LIMITE n\|n>` | canteiro | planta em células vazias |
-| `FERTILIZAR <cultivo\|TUDO> [LIMITE n]` | canteiro | plantas crescendo, ainda não fertilizadas |
-| `LIMPAR [LIMITE n]` | canteiro | arranca plantas estragadas |
-| `COMPRAR <item> <n>` | loja | compra n unidades |
-| `VENDER <cultivo> <TUDO\|n>` | loja | vende unidades da colheita |
+## 2. O que não está na gramática (e por quê)
 
-**Quantificadores.** `TUDO` é tudo o que for possível agora; `LIMITE n` é `TUDO` com teto n; `n` é
-exatamente n — e, por ser exato, a validação confere se o recurso existe.
+- **`MOVER`** — deslocamento é o gargalo do jogo, mas resolvê-lo é BFS, não estratégia. `IR <zona>`
+  anda pelo menor caminho; dentro do canteiro o interpretador vai sozinho à célula mais próxima.
+- **`DORMIR`** — sempre implícito ao fim do plano.
+- **Coordenada** — o modelo erraria, e não precisa: o código sabe quais células estão livres,
+  prontas ou podres.
+- **Filtro por cultivo em `COLHER`** — colhe tudo que está pronto no canteiro; `LIMITE` cobre o caso
+  de dividir a stamina.
 
-`PLANTAR ... TUDO` já nasce limitado pelo menor entre células vazias e sementes no inventário.
-`VENDER ... TUDO` vende o inventário inteiro enquanto a loja tiver caixa.
+## 3. Semântica
 
-## Zonas e distâncias
+- **Execução em ordem**, do topo para baixo. O que estiver no fim pode não acontecer.
+- **Todo comando tolera execução parcial**: faz o que der e segue.
+- **`COMPRAR <cultivo> n` compra sementes** daquele cultivo. `COMPRAR fertilizante n` compra
+  fertilizante. Comprar e vender custam 0 de stamina e exigem estar na `loja`.
+- **`COLHER`** sem `LIMITE` colhe todas as plantas prontas (e não podres) do canteiro. A célula fica
+  livre na hora: plantar logo depois, na mesma viagem, é o uso esperado.
+- **`PLANTAR <cultivo> TUDO`** planta enquanto houver semente e célula livre.
+- **`FERTILIZAR`** age em plantas ainda crescendo e não fertilizadas, até o limite de 3 por dia.
+- **`LIMPAR`** arranca plantas podres: não rende nada, só libera a célula.
+- Dentro do canteiro, **o alvo é sempre a célula mais próxima** (empate: menor coluna, depois menor
+  linha).
 
-| Zona | Célula |
-| --- | --- |
-| `cama` | (17,12) |
-| `loja` | (21,12) |
-| `canteiro_esquerdo` | entrada (6,8); canteiro de colunas 3–9 e linhas 2–8 |
-| `canteiro_direito` | entrada (33,8); canteiro de colunas 30–36 e linhas 2–8 |
-
-| De ↔ Para | Passos |
-| --- | --- |
-| cama ↔ loja | 6 |
-| cama ↔ canteiro_esquerdo | 17 |
-| cama ↔ canteiro_direito | 22 |
-| loja ↔ canteiro_esquerdo | 21 |
-| loja ↔ canteiro_direito | 18 |
-| canteiro_esquerdo ↔ canteiro_direito | 37 |
-
-As distâncias saem do BFS sobre as células andáveis e vão no snapshot de todo dia.
-
-## Execução
-
-- **Ordem literal.** O executor não reordena nada: a sequência de `IR` é a rota.
-- **Guloso dentro do canteiro.** Vai à célula-alvo mais próxima (empate: menor coluna, depois menor
-  linha), age e repete. Só células-alvo entram na rota, e andar entre elas custa estamina.
-- **Dormir é implícito.** Terminado o plano, o jogador volta para a cama e dorme. Não existe verbo
-  `DORMIR`.
-- Tudo passa pelos menus do jogo, pela camada `scripting/` — o executor não consegue trapacear.
-
-### Rede de segurança
+## 4. Rede de segurança de stamina
 
 Antes de cada trecho de caminhada e de cada ação de campo:
 
 ```
-estamina >= passos_até_o_alvo + custo_da_ação + passos_do_alvo_até_a_cama + 1
+stamina >= passos_até_o_alvo + custo_da_ação + passos_do_alvo_até_a_cama + 1
 ```
 
-O `+ 1` não é folga: o jogo declara derrota com estamina 0 **mesmo em cima da cama**, antes de dar
-para dormir. Chegar em casa com zero é game over.
-
-Se a conta não fecha, a ação para ali com `TRUNCADO`/`NAO_EXECUTADO` e motivo `SEM_ESTAMINA` —
-com a estamina que era necessária e a que havia —, todas as seguintes viram `NAO_EXECUTADO` /
-`SEM_ESTAMINA`, e o jogador volta e dorme. O relatório registra `retorno_forcado`, onde aconteceu e
-quais ações ficaram por fazer; o modelo lê isso no dia seguinte.
-
+O `+ 1` existe porque o jogo declara derrota com stamina 0 **mesmo em cima da cama**. Quando a conta
+não fecha, o comando vira `TRUNCADO_STAMINA`, todos os seguintes também, e o jogador volta e dorme.
 `IR` confere a ida inteira antes de sair, para não andar meio caminho só para voltar.
 
-## Resultado de cada ação
+## 5. Códigos de retorno
 
-| Status | Quando |
-| --- | --- |
-| `EXECUTADO` | rodou inteira |
-| `TRUNCADO` | rodou em parte — com `pedido`, `efetivo` e `motivo` |
-| `NAO_EXECUTADO` | não rodou nada — com `motivo` |
+Nunca se pede reenvio ao modelo: **comando inválido é descartado, o resto executa, e o erro volta
+no feedback de amanhã.** Reenviar esconde o erro; reportar ensina.
 
-| Motivo | Quando |
-| --- | --- |
-| `SEM_ESTAMINA` | a rede de segurança barrou |
-| `SEM_ESTOQUE` | a loja não tem mais o item hoje |
-| `SEM_CAIXA_LOJA` | a loja não tem caixa para pagar a próxima unidade |
-| `SEM_MOEDAS` | faltou moeda para comprar |
-| `LIMITE_INVENTARIO` | o jogador já carrega o teto do item |
-| `SEM_CELULA_LIVRE` | não há célula vazia para plantar |
-| `SEM_ALVO` | nenhuma planta atende ao filtro |
-| `SEM_RECURSO` | acabou a semente, o fertilizante ou o vegetal a vender |
-| `LIMITE_FERTILIZANTE_DIARIO` | já foram usados os 3 fertilizantes do dia |
-| `ZONA_ERRADA` | ação de campo fora do canteiro, ou de loja fora da loja |
-| `ESTACAO` | plantar ou fertilizar no inverno |
-| `RECUSADO_PELO_JOGO` | o menu do jogo recusou por um motivo não previsto acima |
+| Código | Significado | O que sinaliza |
+| --- | --- | --- |
+| `OK` | executado por completo | — |
+| `PARCIAL` | executado em parte | contabilidade otimista (moedas, estoque, caixa, limite diário) |
+| `ERRO_GRAMATICA` | token fora do vocabulário | falta expressividade ou exemplo no prompt |
+| `ERRO_CONTEXTO` | verbo certo, lugar ou época errados | perdeu a noção de onde está (ou plantou no inverno) |
+| `ERRO_RECURSO` | falta semente, moeda, item ou alvo | erro de conta |
+| `TRUNCADO_STAMINA` | cortado pela rede de segurança | erro de priorização |
 
-`SEM_MOEDAS`, `SEM_RECURSO`, `ZONA_ERRADA`, `ESTACAO` e `RECUSADO_PELO_JOGO` não estavam na
-[ARQUITETURA-IA.md](ARQUITETURA-IA.md): apareceram na implementação.
+| Verbo | Contexto exigido | Falha por recurso |
+| --- | --- | --- |
+| `IR` | qualquer | — |
+| `COLHER` | canteiro | nada pronto |
+| `PLANTAR` | canteiro, fora do inverno | sem semente / sem célula livre |
+| `FERTILIZAR` | canteiro, fora do inverno | sem fertilizante / sem planta elegível / limite do dia |
+| `LIMPAR` | canteiro | nenhuma planta podre |
+| `COMPRAR` | loja | moedas, estoque da loja, limite do inventário |
+| `VENDER` | loja | não tem o vegetal / caixa da loja acabou |
 
-## Validação
+Todo `ERRO_GRAMATICA` é guardado em `erros_gramatica.csv` na pasta da run: quando o modelo insiste
+em escrever algo que não existe, geralmente faltou expressividade na gramática.
 
-Antes de executar, o plano inteiro é simulado em sequência — uma compra no começo conta para o
-plantio adiante —, sem estamina e sem moedas, que só a execução conhece.
+## 6. Feedback do dia anterior
 
-| Código | Exemplo |
-| --- | --- |
-| `ERRO_GRAMATICA` | token desconhecido, aridade errada, plano que não é lista |
-| `ERRO_ZONA` | `VENDER` sem ter ido à loja |
-| `ERRO_ESTACAO` | `PLANTAR` ou `FERTILIZAR` no inverno |
-| `ERRO_LIMITE_INVENTARIO` | `COMPRAR semente_trigo 20` com 1 no inventário (teto 20) |
-| `ERRO_RECURSO` | `PLANTAR trigo 5` com 2 sementes; `VENDER trigo 3` com 1 |
-| `ERRO_LIMITE_DIARIO` | `FERTILIZAR` com os 3 do dia já usados |
+É o texto que o modelo recebe na chamada seguinte, gerado por `llm_agent/feedback.py`:
 
-Com erro, a lista volta ao modelo para **uma** correção. Se o plano corrigido ainda tiver erro — ou
-a correção não voltar —, só as ações antes do primeiro erro são executadas.
+```
+DIA 12 — executado
+[1] IR loja                      OK (6 passos)
+[2] VENDER trigo TUDO            OK (18 un -> 216 moedas)
+[3] COMPRAR trigo 22             PARCIAL: comprou 6 de 22 (42 moedas): o estoque da loja acabou
+[4] IR canteiro_esquerdo         OK (21 passos)
+[5] COLHER                       OK (7 células)
+[6] PLANTAR trigo TUDO           OK (6 de 7 células livres)
+[7] PLANTAR beterraba LIMITE 5   ERRO_RECURSO: 0 sementes de beterraba
+[--] volta para a cama           OK (17 passos)
+stamina: 160 -> 107   (andando 44 | plantando 12 | colhendo 7 | fertilizando 0 | limpando 0)
+moedas: 27 -> 201
+```
+
+A linha de stamina é a que expõe o gargalo: o deslocamento come mais que o trabalho. Quando algo
+apodrece na virada da noite, ou o bloco de conhecimento passa do teto, o feedback também diz.

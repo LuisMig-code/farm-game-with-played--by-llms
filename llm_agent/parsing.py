@@ -30,14 +30,14 @@ def extract_json(text: str, expected: tuple[str, ...] = ()) -> dict:
             candidatos.append(valor)
 
     if not candidatos:
-        raise ParseError("nenhum objeto JSON valido na resposta")
+        raise ParseError("nenhum objeto JSON válido na resposta")
 
     if expected:
         completos = [c for c in candidatos if all(k in c for k in expected)]
         if completos:
             return completos[-1]          # o ultimo costuma ser a resposta final
         faltam = [k for k in expected if all(k not in c for c in candidatos)]
-        raise ParseError(f"JSON sem as chaves obrigatorias: {', '.join(faltam)}")
+        raise ParseError(f"JSON sem as chaves obrigatórias: {', '.join(faltam)}")
     return candidatos[-1]
 
 

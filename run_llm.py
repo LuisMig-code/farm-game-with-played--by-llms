@@ -23,7 +23,7 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help=f"quantos dias jogar (padrao {settings.DAYS})")
     p.add_argument("--model", default=settings.MODEL, help=f"id no OpenRouter (padrao {settings.MODEL})")
     p.add_argument("--mode", choices=settings.MODES, default=settings.MODE,
-                   help="principal, ou sem_memoria (o caderno chega sempre vazio)")
+                   help="principal, ou sem_memoria (o conhecimento chega sempre vazio)")
     p.add_argument("--knowledge", type=Path, default=None,
                    help="txt com base de conhecimento previa, anexada a chamada de estrategia")
     p.add_argument("--timeout", type=float, default=settings.API_TIMEOUT_SECONDS,
@@ -84,8 +84,8 @@ def main(argv=None) -> int:
     print()
     print(f"run: {args.runs_dir / resumo['pasta']}")
     print(f"moedas no fim: {resumo['moedas_fim']} | dias jogados: {resumo['dias_jogados']} | "
-          f"dias perdidos: {resumo['dias_perdidos']} | retornos forcados: "
-          f"{resumo['retornos_forcados']}")
+          f"dias perdidos: {resumo['dias_perdidos']} | dias truncados: {resumo['dias_truncados']} | "
+          f"custo US$ {resumo['custo_usd']}")
     return 1 if resumo["interrompida"] else 0
 
 

@@ -4,9 +4,9 @@
       resumo.csv
       <AAAA-MM-DD_HH-MM-SS>_<modelo>_<modo>_seed<N>/
         LEIAME.md  config.json  agente.log
-        chamadas.csv  acoes.csv  metricas.csv
+        chamadas.csv  comandos.csv  dias.csv  erros_gramatica.csv
         estrategia/   dias/dia_001/ ...   jogo/   video.mp4
-        caderno_final.txt
+        conhecimento_final.txt
 
 O nome da pasta ordena cronologicamente e diz modelo, modo e semente. Todo CSV e
 gravado com flush por linha: uma run interrompida no meio continua legivel.
@@ -22,22 +22,23 @@ from pathlib import Path
 CALLS_HEADER = ("dia", "tipo", "tentativa", "status", "inicio", "fim", "segundos",
                 "http_status", "finish_reason", "provedor", "tokens_in", "tokens_out",
                 "tokens_raciocinio", "custo_usd", "erro")
-ACTIONS_HEADER = ("dia", "ordem", "acao", "status", "pedido", "efetivo", "motivo",
-                  "estamina_antes", "estamina_depois", "passos", "moedas", "detalhe")
-METRICS_HEADER = (
+COMMANDS_HEADER = ("dia", "ordem", "comando", "codigo", "detalhe", "pedido", "efetivo",
+                   "passos", "moedas", "estamina_antes", "estamina_depois")
+DAYS_HEADER = (
     "dia", "estacao", "status_llm", "dia_perdido", "moedas_inicio", "moedas_fim",
-    "erros_validacao", "correcao_usada", "acoes_total", "acoes_executadas",
-    "acoes_truncadas", "acoes_nao_executadas", "plano_concluido", "retorno_forcado",
-    "estamina_gasta", "estamina_desperdicada", "unidades_vendidas",
-    "unidades_vendidas_abaixo_do_base", "culturas_distintas_vendidas",
-    "plantas_apodrecidas", "linhas_caderno", "linhas_caderno_rejeitadas",
-    "caderno_churn", "chamadas", "segundos_llm", "segundos_maior_chamada",
-    "segundos_execucao", "tokens_in", "tokens_out", "custo_usd",
+    "comandos", "ok", "parcial", "erro_gramatica", "erro_contexto", "erro_recurso",
+    "truncado_stamina", "truncado", "estamina_gasta", "andando", "plantando", "colhendo",
+    "fertilizando", "limpando", "estamina_sobrando", "canteiros_visitados", "vendidas",
+    "vendidas_abaixo_do_base", "apodrecidas", "plantas_no_chao", "conhecimento_linhas",
+    "conhecimento_novas", "conhecimento_removidas", "conhecimento_cortadas", "chamadas",
+    "segundos_llm", "segundos_maior_chamada", "segundos_execucao", "tokens_in",
+    "tokens_out", "custo_usd",
 )
+GRAMMAR_HEADER = ("dia", "ordem", "comando", "erro")
 SUMMARY_HEADER = ("pasta", "inicio", "fim", "modelo", "modo", "seed", "dias_jogados",
-                  "horizonte", "moedas_fim", "dias_perdidos", "dias_timeout",
-                  "retornos_forcados", "acoes_truncadas", "erros_validacao",
-                  "chamadas", "segundos_llm_total", "segundos_por_chamada_media",
+                  "horizonte", "moedas_fim", "dias_perdidos", "dias_timeout", "dias_truncados",
+                  "no_chao_no_fim", "canteiros_usados", "erros_gramatica", "erros_contexto",
+                  "erros_recurso", "chamadas", "segundos_llm_total", "segundos_por_chamada_media",
                   "segundos_maior_chamada", "segundos_run", "tokens_in", "tokens_out",
                   "custo_usd", "interrompida")
 
@@ -45,7 +46,7 @@ LOG_FORMAT = "%(asctime)s %(levelname)-7s %(name)s: %(message)s"
 
 
 def slug(texto: str) -> str:
-    """Pedaco seguro para nome de pasta: 'nvidia/x:free' -> 'x-free'."""
+    """Pedaco seguro para nome de pasta: 'openai/gpt-5.6-luna' -> 'gpt-5.6-luna'."""
     base = texto.split("/")[-1]
     return re.sub(r"[^A-Za-z0-9._-]+", "-", base).strip("-") or "modelo"
 
@@ -85,8 +86,7 @@ class RunFolder:
         self.started = started or datetime.now()
         self.name = f"{self.started:%Y-%m-%d_%H-%M-%S}_{slug(model)}_{mode}_seed{seed}"
         self.root = runs_dir / self.name
-        # Duas runs no mesmo segundo nao podem dividir pasta.
-        sufixo = 2
+        sufixo = 2                                 # duas runs no mesmo segundo
         while self.root.exists():
             self.root = runs_dir / f"{self.name}_{sufixo}"
             sufixo += 1
@@ -105,8 +105,9 @@ class RunFolder:
             (self.root / sub).mkdir(parents=True, exist_ok=True)
 
         self.calls = _Csv(self.root / "chamadas.csv", CALLS_HEADER)
-        self.actions = _Csv(self.root / "acoes.csv", ACTIONS_HEADER)
-        self.metrics = _Csv(self.root / "metricas.csv", METRICS_HEADER)
+        self.commands = _Csv(self.root / "comandos.csv", COMMANDS_HEADER)
+        self.days = _Csv(self.root / "dias.csv", DAYS_HEADER)
+        self.grammar_errors = _Csv(self.root / "erros_gramatica.csv", GRAMMAR_HEADER)
 
         self._handler = logging.FileHandler(self.root / "agente.log", encoding="utf-8")
         self._handler.setFormatter(logging.Formatter(LOG_FORMAT))
@@ -140,6 +141,10 @@ class RunFolder:
 
     def json(self, relative: str | Path, data) -> Path:
         return self.text(relative, json.dumps(data, ensure_ascii=False, indent=2))
+
+    def prompt_text(self, relative: str | Path, prompt) -> Path:
+        return self.text(relative, f"===== SYSTEM =====\n{prompt.system}\n\n"
+                                   f"===== USER =====\n{prompt.user}\n")
 
     def response_text(self, relative: str | Path, result) -> Path:
         """A resposta bruta, com raciocinio e metadados -- nunca a chave."""
@@ -185,7 +190,7 @@ class RunFolder:
         resumo.close()
 
     def close(self) -> None:
-        for arquivo in (self.calls, self.actions, self.metrics):
+        for arquivo in (self.calls, self.commands, self.days, self.grammar_errors):
             arquivo.close()
         logging.getLogger().removeHandler(self._handler)
         self._handler.close()

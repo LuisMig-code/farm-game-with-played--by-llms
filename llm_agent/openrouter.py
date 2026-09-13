@@ -96,7 +96,9 @@ def load_api_key(env_file: Path = settings.ENV_FILE,
 
 class OpenRouterClient:
     def __init__(self, *, model: str, api_key: str, timeout: float,
-                 temperature: float = settings.TEMPERATURE,
+                 temperature: float | None = settings.TEMPERATURE,
+                 reasoning_effort: str | None = settings.REASONING_EFFORT,
+                 json_output: bool = settings.RESPONSE_FORMAT_JSON,
                  max_tokens: int = settings.MAX_TOKENS, seed: int | None = None,
                  include_reasoning: bool = settings.INCLUDE_REASONING,
                  url: str = settings.OPENROUTER_URL):
@@ -104,6 +106,8 @@ class OpenRouterClient:
         self._api_key = api_key
         self.timeout = timeout
         self.temperature = temperature
+        self.reasoning_effort = reasoning_effort
+        self.json_output = json_output
         self.max_tokens = max_tokens
         self.seed = seed
         self.include_reasoning = include_reasoning
@@ -113,10 +117,17 @@ class OpenRouterClient:
         corpo: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "usage": {"include": True},
         }
+        # So o que foi configurado vai: um parametro que o modelo nao lista pode ser
+        # recusado pelo provedor.
+        if self.temperature is not None:
+            corpo["temperature"] = self.temperature
+        if self.reasoning_effort:
+            corpo["reasoning"] = {"effort": self.reasoning_effort}
+        if self.json_output:
+            corpo["response_format"] = {"type": "json_object"}
         if self.seed is not None:
             corpo["seed"] = self.seed
         if self.include_reasoning:

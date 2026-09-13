@@ -1,26 +1,31 @@
-"""Executa o plano no jogo de verdade, com a rede de seguranca de estamina.
+"""O interpretador: expande o plano em acoes do jogo e classifica cada comando.
 
-Regras do executor:
+O LLM decide, o interpretador conta:
 
-- **Ordem literal.** Nada e reordenado: a sequencia de IR e a rota.
+- **Ordem literal.** Os comandos rodam de cima para baixo; a sequencia de IR e a rota.
 - **Guloso dentro do canteiro.** Vai a celula-alvo mais proxima (empate: menor
-  coluna, depois menor linha), age, repete. So celulas-alvo entram na rota.
+  coluna, depois menor linha), age e repete. So celulas-alvo entram na rota.
+- **Comando invalido nao para o plano.** E descartado com o codigo do erro, e
+  os seguintes rodam. Nunca se pede reenvio: o erro volta no feedback de amanha.
 - **Rede de seguranca.** Antes de cada trecho de caminhada e de cada acao de
   campo confere se, depois dela, ainda da para voltar a cama chegando com
   `STAMINA_RESERVE`. O jogo declara derrota com estamina 0 mesmo em cima da
-  cama, entao chegar com zero nao serve. Se nao da, a acao vira TRUNCADO /
-  SEM_ESTAMINA, o resto do plano NAO_EXECUTADO, e o jogador volta e dorme.
+  cama. Se nao da, o comando vira TRUNCADO_STAMINA, o resto do plano tambem, e
+  o jogador volta e dorme.
 - **Tudo pela Session**, ou seja, pelos menus do jogo: nada de trapaca.
+
+Codigos: OK, PARCIAL, ERRO_GRAMATICA, ERRO_CONTEXTO, ERRO_RECURSO, TRUNCADO_STAMINA.
 """
 
 import logging
+from collections import Counter
 from dataclasses import dataclass, field
 
 from farm import seasons, settings as game_settings
-from farm.crops import COIN, CROPS, FERTILIZER, seed_key
+from farm.crops import COIN, FERTILIZER, seed_key
 from llm_agent import settings
-from llm_agent.grammar import (FIELD_VERBS, PLOT_ZONES, SHOP_VERBS, STORE,
-                               ZONE_CELLS, Action, plot_zone_of)
+from llm_agent.grammar import (FIELD_VERBS, PLOT_ZONES, SHOP_VERBS, STORE, ZONE_CELLS,
+                               Command, GrammarError, parse, plot_zone_of)
 from scripting import HOUSE, Blocked, Session, shortest_path
 from scripting.route import STEPS
 
@@ -28,77 +33,67 @@ logger = logging.getLogger(__name__)
 
 Cell = tuple[int, int]
 
-DONE, PARTIAL, SKIPPED = "EXECUTADO", "TRUNCADO", "NAO_EXECUTADO"
-
-NO_STAMINA = "SEM_ESTAMINA"
-NO_STOCK = "SEM_ESTOQUE"
-NO_CASH = "SEM_CAIXA_LOJA"
-INVENTORY_LIMIT = "LIMITE_INVENTARIO"
-NO_FREE_CELL = "SEM_CELULA_LIVRE"
-NO_TARGET = "SEM_ALVO"
-DAILY_FERT_LIMIT = "LIMITE_FERTILIZANTE_DIARIO"
-NO_COINS = "SEM_MOEDAS"
-NO_RESOURCE = "SEM_RECURSO"
-WRONG_ZONE = "ZONA_ERRADA"
-SEASON = "ESTACAO"
-GAME_REFUSED = "RECUSADO_PELO_JOGO"
+OK, PARTIAL = "OK", "PARCIAL"
+GRAMMAR, CONTEXT, RESOURCE, TRUNCATED = ("ERRO_GRAMATICA", "ERRO_CONTEXTO", "ERRO_RECURSO",
+                                         "TRUNCADO_STAMINA")
+CODES = (OK, PARTIAL, GRAMMAR, CONTEXT, RESOURCE, TRUNCATED)
 
 COST = {"PLANTAR": game_settings.STAMINA_PLANT, "COLHER": game_settings.STAMINA_HARVEST,
         "LIMPAR": game_settings.STAMINA_CLEAR, "FERTILIZAR": game_settings.STAMINA_FERTILIZE}
+# Nome de cada fatia da estamina, na ordem em que aparece no feedback.
+STAMINA_PARTS = ("andando", "plantando", "colhendo", "fertilizando", "limpando")
+PART_OF = {"PLANTAR": "plantando", "COLHER": "colhendo", "FERTILIZAR": "fertilizando",
+           "LIMPAR": "limpando"}
 
 
 @dataclass
-class ActionResult:
-    action: str
-    status: str
+class CommandResult:
+    index: int
+    raw: str
+    code: str
+    detail: str = ""
+    verb: str | None = None
+    crop: str | None = None
     requested: int | None = None
     effective: int | None = None
-    reason: str | None = None
-    detail: str | None = None
+    steps: int = 0
+    coins: int = 0                      # ganhas (+) ou gastas (-)
+    below_base: int = 0                 # unidades vendidas abaixo do preco base
     stamina_before: int = 0
     stamina_after: int = 0
-    steps: int = 0
-    coins: int = 0                                   # ganhas (+) ou gastas (-)
-    unit_prices: list[int] = field(default_factory=list)
-    below_base: int = 0                               # unidades vendidas abaixo do base
-    stamina_needed: int | None = None                 # quando faltou estamina
+    stamina_needed: int | None = None   # so no TRUNCADO_STAMINA
 
     def as_dict(self) -> dict:
-        d = {"acao": self.action, "status": self.status,
-             "custo_estamina": self.stamina_before - self.stamina_after}
-        if self.requested is not None:
-            d["pedido"] = self.requested
-        if self.effective is not None:
-            d["efetivo"] = self.effective
-        if self.reason:
-            d["motivo"] = self.reason
-        if self.detail:
-            d["detalhe"] = self.detail
+        d = {"ordem": self.index, "comando": self.raw, "codigo": self.code, "detalhe": self.detail,
+             "estamina_gasta": self.stamina_before - self.stamina_after}
+        for chave, valor in (("pedido", self.requested), ("efetivo", self.effective),
+                             ("estamina_necessaria", self.stamina_needed)):
+            if valor is not None:
+                d[chave] = valor
         if self.steps:
             d["passos"] = self.steps
         if self.coins:
             d["moedas"] = self.coins
-        if self.unit_prices:
-            d["precos_unitarios"] = self.unit_prices
-        if self.stamina_needed is not None:
-            d["estamina_necessaria"] = self.stamina_needed
-            d["estamina_disponivel"] = self.stamina_after
         return d
 
 
 @dataclass
 class DayExecution:
-    results: list[ActionResult] = field(default_factory=list)
-    forced_return: bool = False
-    forced_return_at: str | None = None
-    forced_return_cell: Cell | None = None
+    results: list[CommandResult] = field(default_factory=list)
+    truncated: bool = False
+    truncated_at: str | None = None
     stamina_start: int = 0
     stamina_at_bed: int = 0
     steps_home: int = 0
+    stamina_parts: Counter = field(default_factory=Counter)
+    plot_zones_visited: set = field(default_factory=set)
+
+    def count(self, code: str) -> int:
+        return sum(r.code == code for r in self.results)
 
     @property
     def completed(self) -> bool:
-        return all(r.status == DONE for r in self.results) and not self.forced_return
+        return bool(self.results) and all(r.code == OK for r in self.results)
 
 
 class _OutOfStamina(Exception):
@@ -111,11 +106,11 @@ class Executor:
         self.walkable = session.game.zones.walkable
         self._home = self._distances_from(HOUSE)
         self.zone = "cama"
+        self._day: DayExecution | None = None
 
     # ---------------------------------------------------------- rede de seguranca
 
     def _distances_from(self, origem: Cell) -> dict[Cell, int]:
-        """BFS uma vez so: distancia de toda celula andavel ate a origem."""
         dist, fila = {origem: 0}, [origem]
         for cell in fila:
             for dc, dr in STEPS:
@@ -137,26 +132,43 @@ class Executor:
 
     # -------------------------------------------------------------------- plano
 
-    def run(self, actions: list[Action]) -> DayExecution:
-        dia = DayExecution(stamina_start=self.s.stamina)
+    def run(self, plan) -> DayExecution:
+        dia = self._day = DayExecution(stamina_start=self.s.stamina)
         self.zone = "cama" if self.s.cell == HOUSE else self.zone
-        parado = False
-        for acao in actions:
-            if parado:
-                dia.results.append(ActionResult(acao.raw, SKIPPED, reason=NO_STAMINA,
-                                                stamina_before=self.s.stamina,
-                                                stamina_after=self.s.stamina))
+
+        if not isinstance(plan, list):
+            dia.results.append(CommandResult(1, str(plan)[:200], GRAMMAR,
+                                             "o plano precisa ser uma lista de comandos"))
+            return dia
+
+        for i, linha in enumerate(plan, 1):
+            antes = self.s.stamina
+            if dia.truncated:
+                dia.results.append(CommandResult(i, _raw(linha), TRUNCATED,
+                                                 "descartado: o plano já tinha sido cortado",
+                                                 stamina_before=antes, stamina_after=antes))
                 continue
             try:
-                resultado = self._run_one(acao)
-            except _OutOfStamina as barrou:
-                resultado = barrou.args[0]
-                parado = True
-                dia.forced_return = True
-                dia.forced_return_at = self.zone
-                dia.forced_return_cell = self.s.cell
-                logger.info("rede de seguranca: '%s' parou (%s)", acao.raw, resultado.detail)
-            dia.results.append(resultado)
+                cmd = parse(linha)
+            except GrammarError as erro:
+                dia.results.append(CommandResult(i, _raw(linha), GRAMMAR, str(erro),
+                                                 stamina_before=antes, stamina_after=antes))
+                continue
+
+            r = CommandResult(i, cmd.raw, OK, verb=cmd.verb, crop=cmd.crop, stamina_before=antes)
+            try:
+                if cmd.verb == "IR":
+                    self._go(cmd, r)
+                elif cmd.verb in FIELD_VERBS:
+                    self._field(cmd, r)
+                else:
+                    self._shop(cmd, r)
+            except _OutOfStamina:
+                dia.truncated, dia.truncated_at = True, self.zone
+                r.code = TRUNCATED
+                logger.info("rede de seguranca: '%s' cortado (%s)", cmd.raw, r.detail)
+            r.stamina_after = self.s.stamina
+            dia.results.append(r)
         return dia
 
     def go_home(self, dia: DayExecution) -> None:
@@ -166,246 +178,251 @@ class Executor:
         self.zone = "cama"
         dia.stamina_at_bed = self.s.stamina
 
-    # ------------------------------------------------------------------ acoes
+    # ------------------------------------------------------------------ IR
 
-    def _run_one(self, a: Action) -> ActionResult:
-        r = ActionResult(a.raw, DONE, stamina_before=self.s.stamina)
-        try:
-            if a.verb == "IR":
-                self._go(a, r)
-            elif a.verb in FIELD_VERBS:
-                self._field(a, r)
-            elif a.verb in SHOP_VERBS:
-                self._shop(a, r)
-        except _OutOfStamina:
-            r.stamina_after = self.s.stamina
-            raise _OutOfStamina(r)
-        r.stamina_after = self.s.stamina
-        return r
-
-    def _go(self, a: Action, r: ActionResult) -> None:
-        destino = ZONE_CELLS[a.zone]
+    def _go(self, c: Command, r: CommandResult) -> None:
+        destino = ZONE_CELLS[c.zone]
         caminho = shortest_path(self.s.cell, destino, self.walkable) or []
         r.requested = len(caminho)
-        # Confere a ida inteira antes de sair: andar meio caminho so para voltar
-        # desperdicaria estamina. A guarda por passo continua valendo abaixo.
+        # A ida inteira e conferida antes de sair: andar meio caminho so para
+        # voltar desperdicaria estamina. A guarda por passo continua abaixo.
         if not self.affordable(len(caminho), 0, destino):
-            r.status, r.reason, r.effective = SKIPPED, NO_STAMINA, 0
+            r.effective = 0
             r.stamina_needed = self.needed(len(caminho), 0, destino)
-            r.detail = (f"ir ate {a.zone} custa {len(caminho)} passos e voltar para a cama "
-                        f"mais {self.home_distance(destino)} (+{settings.STAMINA_RESERVE} de "
-                        f"reserva) = {r.stamina_needed}; havia {self.s.stamina}")
+            r.detail = (f"ir até {c.zone} custa {len(caminho)} passos e voltar para a cama "
+                        f"mais {self.home_distance(destino)} (+{settings.STAMINA_RESERVE}) = "
+                        f"{r.stamina_needed}; havia {self.s.stamina}")
             raise _OutOfStamina()
-        andados = self._walk(destino, guarded=True, result=r)
-        r.effective = r.steps = andados
-        self.zone = a.zone
+        r.effective = r.steps = self._walk(destino, guarded=True, result=r)
+        self.zone = c.zone
+        if c.zone in PLOT_ZONES:
+            self._day.plot_zones_visited.add(c.zone)
+        r.detail = f"{r.steps} passos"
 
-    def _walk(self, destino: Cell, guarded: bool, result: ActionResult | None = None) -> int:
-        """Anda passo a passo. Com guarda, confere a rede antes de cada passo."""
+    def _walk(self, destino: Cell, guarded: bool, result: CommandResult | None = None) -> int:
         caminho = shortest_path(self.s.cell, destino, self.walkable) or []
         andados = 0
         for cell in caminho:
             if guarded and not self.affordable(1, 0, cell):
                 if result is not None:
-                    result.status = PARTIAL if andados else SKIPPED
-                    result.reason = NO_STAMINA
-                    result.stamina_needed = self.needed(len(caminho) - andados, 0, destino)
                     result.steps = result.effective = andados
-                    result.detail = (f"andou {andados} de {len(caminho)} passos; faltaram "
-                                     f"{len(caminho) - andados} passos e a volta para a cama")
+                    result.stamina_needed = self.needed(len(caminho) - andados, 0, destino)
+                    result.detail = (f"andou {andados} de {len(caminho)} passos; faltou stamina "
+                                     "para seguir e ainda voltar")
                 raise _OutOfStamina()
             atual = self.s.cell
             self.s.step((cell[0] - atual[0], cell[1] - atual[1]))
             andados += 1
+            self._day.stamina_parts["andando"] += game_settings.STAMINA_WALK
         return andados
 
-    # ----------------------------------------------------------------- campo
+    # ---------------------------------------------------------------- campo
 
-    def _field(self, a: Action, r: ActionResult) -> None:
+    def _field(self, c: Command, r: CommandResult) -> None:
         if self.zone not in PLOT_ZONES:
-            r.status, r.reason = SKIPPED, WRONG_ZONE
-            r.detail = f"{a.verb} exige estar num canteiro; o jogador estava em '{self.zone}'"
+            r.code = CONTEXT
+            r.detail = f"{c.verb} exige estar num canteiro; você estava em {self.zone}"
+            return
+        estacao = seasons.season_at(self.s.day)
+        if c.verb == "PLANTAR" and not estacao.can_plant:
+            r.code, r.detail = CONTEXT, f"não se planta no {estacao.label.lower()}"
+            return
+        if c.verb == "FERTILIZAR" and not estacao.fertilizer_works:
+            r.code, r.detail = CONTEXT, f"fertilizante não funciona no {estacao.label.lower()}"
             return
 
-        game, day = self.s.game, self.s.day
-        estacao = seasons.season_at(day)
-        if a.verb == "PLANTAR" and not estacao.can_plant:
-            r.status, r.reason, r.detail = SKIPPED, SEASON, f"nao se planta no {estacao.label}"
-            return
-        if a.verb == "FERTILIZAR" and not estacao.fertilizer_works:
-            r.status, r.reason = SKIPPED, SEASON
-            r.detail = f"fertilizante nao funciona no {estacao.label}"
+        alvos = self._targets(c)
+        cabe, falta = self._available(c, len(alvos))
+        if cabe == 0:
+            r.code, r.requested, r.effective, r.detail = RESOURCE, c.limit, 0, falta
             return
 
-        alvos = self._targets(a)
-        if a.verb == "FERTILIZAR":
-            # O pedido e o que esta elegivel; se o limite diario ou o estoque de
-            # fertilizante cortarem, o relatorio mostra o truncamento com o motivo.
-            pedido, motivo_zero = a.cap(len(alvos)), NO_TARGET
-        else:
-            # PLANTAR TUDO ja nasce limitado pelo menor entre celulas e sementes.
-            disponivel, motivo_zero = self._available(a, len(alvos))
-            pedido = a.cap(disponivel)
+        # PLANTAR TUDO e COLHER/LIMPAR/FERTILIZAR sem LIMITE pedem o que da.
+        pedido = c.cap(len(alvos) if c.verb == "FERTILIZAR" else cabe)
         r.requested = pedido
-        if pedido == 0:
-            r.status, r.effective = SKIPPED, 0
-            r.reason = motivo_zero or NO_TARGET
-            return
-
-        feitos, restantes = 0, set(alvos)
+        feitos, restantes, corte = 0, set(alvos), None
         while feitos < pedido:
-            cabe, motivo = self._available(a, len(restantes))
+            cabe, corte = self._available(c, len(restantes))
             if cabe == 0:
-                r.reason = motivo
                 break
             alvo = self._nearest(restantes)
             caminho = shortest_path(self.s.cell, alvo, self.walkable) or []
-            if not self.affordable(len(caminho), COST[a.verb], alvo):
+            if not self.affordable(len(caminho), COST[c.verb], alvo):
                 r.effective = feitos
-                r.status = PARTIAL if feitos else SKIPPED
-                r.reason = NO_STAMINA
-                r.stamina_needed = self.needed(len(caminho), COST[a.verb], alvo)
-                r.detail = (f"fez {feitos} de {pedido}; a proxima ({alvo}) exigia "
-                            f"{r.stamina_needed} de estamina (andar {len(caminho)} + acao "
-                            f"{COST[a.verb]} + voltar {self.home_distance(alvo)} + reserva "
-                            f"{settings.STAMINA_RESERVE}) e havia {self.s.stamina}")
+                r.stamina_needed = self.needed(len(caminho), COST[c.verb], alvo)
+                r.detail = (f"{_verbo_passado(c.verb)} {feitos} de {pedido}; a próxima exigia "
+                            f"{r.stamina_needed} de stamina (andar {len(caminho)} + "
+                            f"{c.verb.lower()} {COST[c.verb]} + voltar "
+                            f"{self.home_distance(alvo)} + reserva {settings.STAMINA_RESERVE}), "
+                            f"havia {self.s.stamina}")
                 raise _OutOfStamina()
             r.steps += self._walk(alvo, guarded=False)
             try:
-                self._act(a)
+                self._act(c)
             except Blocked as erro:
-                r.reason, r.detail = GAME_REFUSED, str(erro)
+                corte = f"o jogo recusou: {erro}"
                 break
+            self._day.stamina_parts[PART_OF[c.verb]] += COST[c.verb]
             restantes.discard(alvo)
             feitos += 1
 
         r.effective = feitos
-        if feitos < pedido:
-            r.status = PARTIAL if feitos else SKIPPED
+        r.detail = self._field_detail(c, feitos, pedido, len(alvos))
+        if feitos < pedido and corte:
+            r.code = PARTIAL
+            r.detail = f"{_verbo_passado(c.verb)} {feitos} de {pedido}: {corte}"
 
-    def _targets(self, a: Action) -> list[Cell]:
+    @staticmethod
+    def _field_detail(c: Command, feitos: int, pedido: int, alvos: int) -> str:
+        if c.verb == "PLANTAR":
+            return f"{feitos} de {_n(alvos, 'célula livre', 'células livres')}"
+        if c.verb == "FERTILIZAR":
+            return _n(feitos, "planta", "plantas")
+        texto = _n(feitos, "célula", "células")
+        sobra = alvos - feitos
+        if c.verb == "COLHER" and sobra:
+            texto += "; " + (_n(sobra, "pronta ficou", "prontas ficaram"))
+        return texto
+
+    def _targets(self, c: Command) -> list[Cell]:
         game, day, campo = self.s.game, self.s.day, self.s.game.field
-        celulas = [c for c in game.zones.plantable if plot_zone_of(c) == self.zone]
-        if a.verb == "PLANTAR":
-            return [c for c in celulas if campo.at(c) is None]
+        celulas = [x for x in game.zones.plantable if plot_zone_of(x) == self.zone]
+        if c.verb == "PLANTAR":
+            return [x for x in celulas if campo.at(x) is None]
         alvos = []
-        for c in celulas:
-            plot = campo.at(c)
+        for x in celulas:
+            plot = campo.at(x)
             if plot is None:
                 continue
-            if a.crop and plot.crop != a.crop:
-                continue
-            podre = campo.is_spoiled(c, day)
-            pronta = campo.is_grown(c, day)
-            if a.verb == "LIMPAR" and podre:
-                alvos.append(c)
-            elif a.verb == "COLHER" and pronta and not podre:
-                alvos.append(c)
-            elif a.verb == "FERTILIZAR" and not pronta and not podre and not plot.fertilized:
-                alvos.append(c)
+            podre, pronta = campo.is_spoiled(x, day), campo.is_grown(x, day)
+            if c.verb == "LIMPAR" and podre:
+                alvos.append(x)
+            elif c.verb == "COLHER" and pronta and not podre:
+                alvos.append(x)
+            elif c.verb == "FERTILIZAR" and not pronta and not podre and not plot.fertilized:
+                alvos.append(x)
         return alvos
 
-    def _available(self, a: Action, alvos: int) -> tuple[int, str | None]:
-        """Quantas unidades cabem agora e, se cortou, o que cortou."""
+    def _available(self, c: Command, alvos: int) -> tuple[int, str | None]:
+        """Quantas unidades cabem agora e, se nao couber tudo, o motivo."""
         game = self.s.game
-        if alvos == 0:
-            return 0, NO_FREE_CELL if a.verb == "PLANTAR" else NO_TARGET
-        if a.verb == "PLANTAR":
-            sementes = game.inventory.count(seed_key(a.crop))
-            return min(alvos, sementes), (NO_RESOURCE if sementes < alvos else None)
-        if a.verb == "FERTILIZAR":
+        if c.verb == "PLANTAR":
+            sementes = game.inventory.count(seed_key(c.crop))
+            if sementes == 0:
+                return 0, f"0 sementes de {c.crop}"
+            if alvos == 0:
+                return 0, f"nenhuma célula livre em {self.zone}"
+            if sementes < alvos:
+                return sementes, "acabaram as sementes"
+            return alvos, None
+        if c.verb == "FERTILIZAR":
             estoque = game.inventory.count(FERTILIZER)
             diario = max(0, game_settings.FERTILIZERS_PER_DAY - game.fertilizers_today)
+            if alvos == 0:
+                return 0, f"nenhuma planta crescendo sem fertilizante em {self.zone}"
+            if diario == 0:
+                return 0, f"limite de {game_settings.FERTILIZERS_PER_DAY} fertilizantes por dia já usado"
+            if estoque == 0:
+                return 0, "0 fertilizantes"
             n = min(alvos, estoque, diario)
-            if n == alvos:
-                return n, None
-            return n, DAILY_FERT_LIMIT if diario <= estoque else NO_RESOURCE
+            if n < alvos:
+                return n, (f"limite de {game_settings.FERTILIZERS_PER_DAY} por dia"
+                           if diario <= estoque else "acabou o fertilizante")
+            return n, None
+        if alvos == 0:
+            return 0, (f"nada pronto para colher em {self.zone}" if c.verb == "COLHER"
+                       else f"nenhuma planta podre em {self.zone}")
         return alvos, None
 
     def _nearest(self, cells) -> Cell:
-        origem = self.s.cell
-        dist = self._distances_from(origem) if len(cells) > 1 else None
+        dist = self._distances_from(self.s.cell)
+        return min(cells, key=lambda x: (dist[x], x[0], x[1]))
 
-        def chave(c):
-            passos = dist[c] if dist is not None else 0
-            return (passos, c[0], c[1])
-        return min(cells, key=chave)
-
-    def _act(self, a: Action) -> None:
-        if a.verb == "PLANTAR":
-            self.s.plant(a.crop)
-        elif a.verb == "COLHER":
-            self.s.harvest()
-        elif a.verb == "LIMPAR":
-            self.s.clear()
-        else:
-            self.s.fertilize()
+    def _act(self, c: Command) -> None:
+        {"PLANTAR": lambda: self.s.plant(c.crop), "COLHER": self.s.harvest,
+         "LIMPAR": self.s.clear, "FERTILIZAR": self.s.fertilize}[c.verb]()
 
     # ------------------------------------------------------------------ loja
 
-    def _shop(self, a: Action, r: ActionResult) -> None:
+    def _shop(self, c: Command, r: CommandResult) -> None:
         if self.zone != STORE:
-            r.status, r.reason = SKIPPED, WRONG_ZONE
-            r.detail = f"{a.verb} exige estar na loja; o jogador estava em '{self.zone}'"
+            r.code = CONTEXT
+            r.detail = f"{c.verb} exige estar na loja; voce estava em {self.zone}"
             return
-        if a.verb == "COMPRAR":
-            self._buy(a, r)
-        else:
-            self._sell(a, r)
+        (self._buy if c.verb == "COMPRAR" else self._sell)(c, r)
 
-    def _buy(self, a: Action, r: ActionResult) -> None:
-        game = self.s.game
-        r.requested = a.amount
-        feitos = 0
-        while feitos < a.amount:
+    def _buy(self, c: Command, r: CommandResult) -> None:
+        game, nome = self.s.game, ("fertilizantes" if c.item == FERTILIZER
+                                   else f"sementes de {c.crop}")
+        r.requested, feitos, motivo = c.amount, 0, None
+        while feitos < c.amount:
             loja, inv = game.market, game.inventory
-            preco = loja.buy_price(a.item)
-            if loja.stock_left(a.item) == 0:
-                r.reason = NO_STOCK
-                break
-            if inv.is_full(a.item):
-                r.reason = INVENTORY_LIMIT
-                break
-            if inv.count(COIN) < preco:
-                r.reason = NO_COINS
+            preco = loja.buy_price(c.item)
+            if loja.stock_left(c.item) == 0:
+                motivo = "o estoque da loja acabou"
+            elif inv.is_full(c.item):
+                motivo = f"o limite de {inv.limit_for(c.item)} no inventário"
+            elif inv.count(COIN) < preco:
+                motivo = f"{inv.count(COIN)} moedas não pagam mais uma a {preco}"
+            if motivo:
                 break
             try:
-                self.s.buy(a.item, 1)
+                self.s.buy(c.item, 1)
             except Blocked as erro:
-                r.reason, r.detail = GAME_REFUSED, str(erro)
+                motivo = f"o jogo recusou: {erro}"
                 break
             r.coins -= preco
-            r.unit_prices.append(preco)
             feitos += 1
         r.effective = feitos
-        if feitos < a.amount:
-            r.status = PARTIAL if feitos else SKIPPED
+        if feitos == c.amount:
+            r.detail = f"{feitos} {nome} -> {-r.coins} moedas"
+        elif feitos == 0:
+            r.code, r.detail = RESOURCE, f"não comprou nenhuma: {motivo}"
+        else:
+            r.code, r.detail = PARTIAL, f"comprou {feitos} de {c.amount} ({-r.coins} moedas): {motivo}"
 
-    def _sell(self, a: Action, r: ActionResult) -> None:
+    def _sell(self, c: Command, r: CommandResult) -> None:
         game = self.s.game
-        tem = game.inventory.count(a.crop)
-        r.requested = tem if a.all_ else a.amount
-        feitos = 0
+        tem = game.inventory.count(c.crop)
+        r.requested = tem if c.all_ else c.amount
+        if tem == 0:
+            r.code, r.effective, r.detail = RESOURCE, 0, f"0 unidades de {c.crop} na mochila"
+            return
+        feitos, motivo = 0, None
         while feitos < r.requested:
-            loja, day = game.market, self.s.day
-            if game.inventory.count(a.crop) == 0:
-                r.reason = NO_RESOURCE
+            loja, dia = game.market, self.s.day
+            if game.inventory.count(c.crop) == 0:
+                motivo = f"só havia {tem} na mochila"
                 break
-            if not loja.can_sell(a.crop, day):
-                r.reason = NO_CASH
+            if not loja.can_sell(c.crop, dia):
+                motivo = f"o caixa da loja acabou ({loja.budget_left(dia)} moedas)"
                 break
-            preco, base = loja.sell_price(a.crop, day), loja.base_price(a.crop, day)
+            preco, base = loja.sell_price(c.crop, dia), loja.base_price(c.crop, dia)
             try:
-                self.s.sell(a.crop, 1)
+                self.s.sell(c.crop, 1)
             except Blocked as erro:
-                r.reason, r.detail = GAME_REFUSED, str(erro)
+                motivo = f"o jogo recusou: {erro}"
                 break
             r.coins += preco
-            r.unit_prices.append(preco)
             r.below_base += preco < base
             feitos += 1
         r.effective = feitos
-        if r.requested == 0:
-            r.status, r.reason = SKIPPED, NO_RESOURCE
-        elif feitos < r.requested:
-            r.status = PARTIAL if feitos else SKIPPED
+        if feitos == r.requested:
+            r.detail = f"{feitos} un -> {r.coins} moedas"
+        elif feitos == 0:
+            r.code, r.detail = RESOURCE, f"não vendeu nenhuma: {motivo}"
+        else:
+            r.code, r.detail = PARTIAL, f"vendeu {feitos} de {r.requested} ({r.coins} moedas): {motivo}"
+
+
+def _n(n: int, singular: str, plural: str) -> str:
+    return f"{n} {singular if n == 1 else plural}"
+
+
+def _raw(linha) -> str:
+    return " ".join(linha.split()) if isinstance(linha, str) else str(linha)[:200]
+
+
+def _verbo_passado(verbo: str) -> str:
+    return {"PLANTAR": "plantou", "COLHER": "colheu", "FERTILIZAR": "fertilizou",
+            "LIMPAR": "limpou"}[verbo]

@@ -1,35 +1,48 @@
-"""Uma run completa: estrategia, depois um ciclo por dia.
+"""Uma run completa, no laco do Projeto Fazenda.
 
-    dia D: snapshot -> chamada -> validacao -> (1 correcao) -> executor -> cama -> dormir
+    chamada inicial (1x): regras + prazo + custos -> analise, regras_de_bolso, estrategia (<=128)
+    cada dia:  estrategia + estado calculado + prazo + feedback de ontem + diario + conhecimento
+               -> leitura_do_dia, conhecimento (reescrito, <=15), plano
+               -> interpretador executa em ordem, descarta o invalido, reserva a volta, dorme
+               -> feedback classificado para amanha
 
-Timeout de uma chamada nao e repetido: o jogador dorme e o proximo dia recebe o
-aviso. Resposta que chegou mas nao serve (JSON invalido, 429, 5xx) e tentada de
-novo ate `API_MAX_ATTEMPTS`.
+Total: N + 1 chamadas para N dias. Nunca se pede reenvio de plano: comando
+invalido e descartado e vira feedback. So se repete chamada cuja resposta chegou
+mas nao serve como JSON (ou 429/5xx). Timeout nao repete: o jogador dorme.
 """
 
 import faulthandler
 import logging
 import os
+import shutil
 import time
 from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 from farm import rng as farm_rng
 from farm import seasons, settings as game_settings
-from farm.crops import CROPS
-from llm_agent import notebook as nb
-from llm_agent import prompts, settings, snapshot
-from llm_agent.executor import DONE, PARTIAL, SKIPPED, DayExecution, Executor
-from llm_agent.openrouter import OK, TIMEOUT, OpenRouterClient, load_api_key
+from llm_agent import facts, feedback, responses, settings, templates
+from llm_agent.executor import (CONTEXT, GRAMMAR, OK, PARTIAL, RESOURCE, TRUNCATED, DayExecution,
+                                Executor)
+from llm_agent.openrouter import OK as HTTP_OK
+from llm_agent.openrouter import TIMEOUT, OpenRouterClient, load_api_key
 from llm_agent.parsing import ParseError, extract_json
 from llm_agent.run_logs import RunFolder, call_timing
-from llm_agent.validator import validate
 from scripting import Aborted, Session
 
 logger = logging.getLogger(__name__)
 
 LLM_OK, LLM_TIMEOUT, LLM_API_ERROR, LLM_BAD_JSON = "ok", "timeout", "erro_api", "json_invalido"
+
+
+@dataclass
+class Outcome:
+    status: str
+    parsed: dict | None = None       # a resposta aprovada
+    candidate: dict | None = None    # o ultimo JSON lido, mesmo reprovado
+    problem: str | None = None       # por que o ultimo JSON foi reprovado
 
 
 class LLMRun:
@@ -40,7 +53,9 @@ class LLMRun:
                  api_timeout: float = settings.API_TIMEOUT_SECONDS,
                  max_attempts: int = settings.API_MAX_ATTEMPTS,
                  retry_wait: float = settings.API_RETRY_WAIT_SECONDS,
-                 runs_dir: Path = settings.RUNS_DIR, client=None):
+                 runs_dir: Path = settings.RUNS_DIR, client=None,
+                 prompt_strategy: Path = settings.PROMPT_STRATEGY,
+                 prompt_day: Path = settings.PROMPT_DAY):
         if mode not in settings.MODES:
             raise ValueError(f"modo invalido '{mode}' (validos: {', '.join(settings.MODES)})")
         if days < 1:
@@ -51,17 +66,20 @@ class LLMRun:
         self.video, self.realtime = video, realtime
         self.api_timeout, self.max_attempts, self.retry_wait = api_timeout, max_attempts, retry_wait
         self.runs_dir = Path(runs_dir)
+        self.prompt_strategy, self.prompt_day = Path(prompt_strategy), Path(prompt_day)
         self.knowledge_path = Path(knowledge_path) if knowledge_path else None
-        self.knowledge = (self.knowledge_path.read_text(encoding="utf-8")
-                          if self.knowledge_path else None)
+        self.knowledge_base = (self.knowledge_path.read_text(encoding="utf-8")
+                               if self.knowledge_path else None)
         self.client = client or OpenRouterClient(
             model=model, api_key=load_api_key(), timeout=api_timeout, seed=self.seed)
 
         self.session: Session | None = None
         self.folder: RunFolder | None = None
         self.strategy = ""
-        self.notebook: list[str] = []
+        self.knowledge: list[str] = []
+        self.diary: list[str] = []
         self.last_sold: dict[str, int] = {}
+        self.plot_zones_used: set[str] = set()
         self.totals = Counter()
         self._day_calls = Counter()
         self._day_timings: list[dict] = []
@@ -69,6 +87,11 @@ class LLMRun:
     # --------------------------------------------------------------- execucao
 
     def run(self) -> dict:
+        # Os dois templates sao conferidos antes de abrir o jogo: placeholder
+        # errado no .md falha aqui, e nao no meio da run.
+        for caminho in (self.prompt_strategy, self.prompt_day):
+            templates.load(caminho)
+
         self.folder = RunFolder(self.runs_dir, model=self.model, mode=self.mode, seed=self.seed)
         # Atribuicao em runtime, antes de criar o Game: os logs nativos do jogo
         # vao para dentro da pasta da run. O arquivo de settings nao muda.
@@ -76,19 +99,17 @@ class LLMRun:
         logger.info("run %s | modelo %s | modo %s | semente %s | %d dias",
                     self.folder.name, self.model, self.mode, self.seed, self.days)
 
-        interrompida = None
-        dia_final = 0
+        interrompida, dia_final = None, 0
         try:
             self.session = Session(seed=self.seed, realtime=self.realtime,
                                    record=self.folder.video if self.video else None)
             self.executor = Executor(self.session)
-            self.system = prompts.system_prompt(self.days)
             self._write_config()
             self._strategy()
 
-            relatorio = None
+            feedback_ontem = "Hoje é o primeiro dia: ainda não há feedback."
             for dia in range(game_settings.FIRST_DAY, self.days + 1):
-                relatorio = self._day(dia, relatorio)
+                feedback_ontem = self._day(dia, feedback_ontem)
                 dia_final = dia
                 if self.session.over:
                     interrompida = "game over (nao deveria acontecer com a rede de seguranca)"
@@ -104,143 +125,182 @@ class LLMRun:
     # ------------------------------------------------------------- estrategia
 
     def _strategy(self) -> None:
-        game = self.session.game
         self._day_calls, self._day_timings = Counter(), []
-        snap = snapshot.build(game, horizon=self.days, last_sold=self.last_sold)
-        user = prompts.strategy_prompt(snap, self.days, self.knowledge)
-        self.folder.text("estrategia/prompt_system.txt", self.system)
-        self.folder.text("estrategia/prompt_user.txt", user)
+        valores = facts.strategy_values(self.session.game, self.days, self.knowledge_base)
+        prompt = templates.render(self.prompt_strategy, valores)
+        self.folder.prompt_text("estrategia/prompt.txt", prompt)
 
-        mensagens = [{"role": "system", "content": self.system},
-                     {"role": "user", "content": user}]
-        status, parsed, _ = self._call(mensagens, 0, "estrategia", "estrategia/resposta",
-                                       prompts.STRATEGY_KEYS)
-        check = nb.check(parsed.get("caderno") if parsed else [])
-        if parsed:
-            self.strategy = str(parsed.get("estrategia") or "").strip()
-            self.notebook = check.accepted
-        logger.info("estrategia: %s | %d linhas de caderno aceitas, %d rejeitadas",
-                    status, len(check.accepted), len(check.rejected))
+        out = self._call(prompt.messages(), 0, "estrategia", "estrategia/resposta",
+                         responses.STRATEGY_KEYS, responses.strategy_problem)
+        cortada = False
+        dados = out.parsed
+        if dados is None and out.candidate and isinstance(out.candidate.get("estrategia"), str):
+            # Esgotou as tentativas so por tamanho: usa a ultima, cortada no teto.
+            dados, cortada = out.candidate, True
+        if dados is not None:
+            texto = " ".join(str(dados.get("estrategia") or "").split())
+            self.strategy = texto[:settings.STRATEGY_MAX_CHARS]
+            cortada = cortada or len(texto) > settings.STRATEGY_MAX_CHARS
+
+        logger.info("estrategia: %s%s | %r", out.status, " (cortada)" if cortada else "",
+                    self.strategy)
         self.folder.json("estrategia/chamadas.json", self._timing_summary())
         self.folder.json("estrategia/estrategia.json", {
-            "status_llm": status, "estrategia": self.strategy,
-            "caderno": check.accepted, "caderno_rejeitado": check.rejected,
+            "status_llm": out.status,
+            "estrategia": self.strategy,
+            "estrategia_cortada": cortada,
+            "caracteres": len(self.strategy),
+            "analise": (dados or {}).get("analise"),
+            "regras_de_bolso": (dados or {}).get("regras_de_bolso"),
+            "problema_na_ultima_resposta": out.problem,
             "base_de_conhecimento": str(self.knowledge_path) if self.knowledge_path else None,
         })
 
     # -------------------------------------------------------------------- dia
 
-    def _day(self, dia: int, ontem: dict | None) -> dict:
+    def _day(self, dia: int, feedback_ontem: str) -> str:
         s, game = self.session, self.session.game
         assert s.day == dia, (s.day, dia)
-        pasta = self.folder.day_dir(dia)
-        rel = pasta.relative_to(self.folder.root)
+        rel = self.folder.day_dir(dia).relative_to(self.folder.root)
         self._day_calls, self._day_timings = Counter(), []
 
         moedas_inicio, estamina_inicio = s.coins, s.stamina
         podres_antes = Counter(game.stats.spoiled)
         memoria = self.mode == "principal"
 
-        snap = snapshot.build(game, horizon=self.days, last_sold=self.last_sold)
-        self.folder.json(rel / "snapshot.json", snap)
-        user = prompts.day_prompt(snapshot=snap, horizon=self.days, strategy=self.strategy,
-                                  notebook=self.notebook if memoria else [],
-                                  report=ontem, memory=memoria)
-        self.folder.text(rel / "prompt_user.txt", user)
-        mensagens = [{"role": "system", "content": self.system},
-                     {"role": "user", "content": user}]
+        valores = facts.day_values(
+            game, horizon=self.days, strategy=self.strategy, feedback=feedback_ontem,
+            diary=self.diary[-settings.DIARY_DAYS:], knowledge=self.knowledge if memoria else [],
+            memory=memoria, last_sold=self.last_sold)
+        prompt = templates.render(self.prompt_day, valores)
+        self.folder.prompt_text(rel / "prompt.txt", prompt)
+        self.folder.json(rel / "estado.json", facts.state_snapshot(game, self.days))
 
-        status, parsed, conteudo = self._call(mensagens, dia, "dia", rel / "resposta",
-                                              prompts.DAY_KEYS)
-        erros, erros_finais, correcao, status_correcao = [], [], False, None
-        plano_linhas, raciocinio, so_prefixo = [], "", False
-        check = nb.NotebookCheck()
-        execucao = DayExecution(stamina_start=estamina_inicio)
+        out = self._call(prompt.messages(), dia, "dia", rel / "resposta",
+                         responses.DAY_KEYS, responses.day_problem)
+        leitura, plano, conhecimento = "", [], responses.Knowledge(lines=list(self.knowledge))
+        anterior = list(self.knowledge)
 
-        if status == LLM_OK:
-            raciocinio = str(parsed.get("raciocinio") or "")
-            plano_linhas = parsed.get("plano")
-            check = nb.check(parsed.get("caderno"))
-            validacao = validate(game, plano_linhas)
-            erros = [e.as_dict() for e in validacao.errors]
-
-            if not validacao.ok:
-                correcao = True
-                pedido = prompts.correction_prompt(erros)
-                self.folder.text(rel / "correcao_prompt.txt", pedido)
-                logger.info("dia %d: %d erro(s) de validacao, pedindo correcao", dia, len(erros))
-                status_correcao, parsed2, _ = self._call(
-                    mensagens + [{"role": "assistant", "content": conteudo},
-                                 {"role": "user", "content": pedido}],
-                    dia, "correcao", rel / "correcao_resposta", prompts.DAY_KEYS)
-                if status_correcao == LLM_OK:
-                    plano_linhas = parsed2.get("plano")
-                    raciocinio = str(parsed2.get("raciocinio") or raciocinio)
-                    if "caderno" in parsed2:
-                        check = nb.check(parsed2.get("caderno"))
-                    validacao = validate(game, plano_linhas)
-                erros_finais = [e.as_dict() for e in validacao.errors]
-
-            acoes = validacao.actions if validacao.ok else validacao.valid_prefix
-            so_prefixo = not validacao.ok
+        if out.status == LLM_OK:
+            leitura = str(out.parsed.get("leitura_do_dia") or "")
+            plano = out.parsed.get("plano")
+            conhecimento = responses.curate(out.parsed.get("conhecimento"))
             inicio_jogo = time.monotonic()
-            execucao = self.executor.run(acoes)
+            execucao = self.executor.run(plano)
             # Reescrito tambem no modo sem memoria: la ele so nao volta no prompt,
-            # e assim formato e custo das respostas ficam iguais nos dois modos.
-            anterior, self.notebook = self.notebook, check.accepted
-            churn = check.churn(anterior)
+            # e formato e custo das respostas ficam iguais nos dois modos.
+            self.knowledge = conhecimento.lines
         else:
-            churn = 0
             inicio_jogo = time.monotonic()
-            logger.warning("dia %d sem plano (%s): o jogador dorme", dia, status)
+            execucao = DayExecution(stamina_start=estamina_inicio)
+            logger.warning("dia %d sem plano (%s): o jogador dorme", dia, out.status)
 
         self.executor.go_home(execucao)
         if dia < self.days:
             s.sleep()
         segundos_execucao = time.monotonic() - inicio_jogo
         apodreceram = Counter(game.stats.spoiled) - podres_antes
+        self.plot_zones_used |= execucao.plot_zones_visited
+        for r in execucao.results:
+            if r.verb == "VENDER" and r.effective:
+                self.last_sold[r.crop] = dia
+
+        aviso = self._warning(out.status)
+        texto_feedback = feedback.day_feedback(
+            dia, execucao, status_llm=out.status, aviso=aviso, moedas_inicio=moedas_inicio,
+            moedas_fim=s.coins, apodreceram=apodreceram, knowledge_cut=conhecimento.cut)
+        self.diary.append(feedback.diary_line(
+            dia, execucao, status_llm=out.status, moedas_inicio=moedas_inicio,
+            moedas_fim=s.coins, leitura=leitura))
+
+        self._save_day(dia, rel, out, leitura, plano, conhecimento, anterior, execucao,
+                       texto_feedback, moedas_inicio, apodreceram, segundos_execucao, aviso)
+        logger.info("dia %d fim | %s | moedas %d -> %d | %s | stamina na cama %d | LLM %.0fs em "
+                    "%d chamada(s), jogo %.0fs", dia, out.status, moedas_inicio, s.coins,
+                    _code_summary(execucao), execucao.stamina_at_bed, self._day_calls["segundos"],
+                    self._day_calls["chamadas"], segundos_execucao)
+        return texto_feedback
+
+    def _warning(self, status: str) -> str | None:
+        if status == LLM_TIMEOUT:
+            return (f"A sua resposta não chegou a tempo (limite de {self.api_timeout:.0f} s, ou o "
+                    "provedor desistiu antes). O jogador dormiu sem agir.")
+        if status != LLM_OK:
+            return f"A sua resposta não pôde ser usada ({status}). O jogador dormiu sem agir."
+        return None
+
+    def _save_day(self, dia, rel, out, leitura, plano, conhecimento, anterior, execucao,
+                  texto_feedback, moedas_inicio, apodreceram, segundos_execucao, aviso) -> None:
+        f, s = self.folder, self.session
+        if out.parsed is not None:
+            f.json(rel / "resposta.json", out.parsed)
+        f.text(rel / "feedback.txt", texto_feedback + "\n")
+        f.text(rel / "conhecimento.md", _knowledge_md(dia, self.knowledge, conhecimento, anterior))
+        f.json(rel / "chamadas.json", {**self._timing_summary(),
+                                       "segundos_execucao_jogo": round(segundos_execucao, 1)})
+        f.json(rel / "relatorio.json", {
+            "dia": dia, "status_llm": out.status, "dia_perdido": out.status != LLM_OK,
+            "aviso": aviso, "leitura_do_dia": leitura,
+            "plano": plano if isinstance(plano, list) else plano,
+            "comandos": [r.as_dict() for r in execucao.results],
+            "truncado": execucao.truncated, "truncado_em": execucao.truncated_at,
+            "estamina": {"inicio": execucao.stamina_start, "na_cama": execucao.stamina_at_bed,
+                         "gasta": execucao.stamina_start - execucao.stamina_at_bed,
+                         **{p: execucao.stamina_parts[p] for p in feedback.STAMINA_PARTS}},
+            "passos_de_volta_para_a_cama": execucao.steps_home,
+            "moedas": {"inicio": moedas_inicio, "fim": s.coins},
+            "apodreceram_na_virada": dict(apodreceram),
+            "canteiros_visitados": sorted(execucao.plot_zones_visited),
+            "conhecimento": {"linhas": len(conhecimento.lines),
+                             "novas": conhecimento.new_since(anterior),
+                             "removidas": conhecimento.removed_since(anterior),
+                             "cortadas": conhecimento.cut},
+        })
 
         for r in execucao.results:
-            if r.action.upper().startswith("VENDER") and r.effective:
-                self.last_sold[r.action.split()[1].lower()] = dia
+            f.commands.row([dia, r.index, r.raw, r.code, r.detail, r.requested, r.effective,
+                            r.steps, r.coins, r.stamina_before, r.stamina_after])
+            if r.code == GRAMMAR:
+                f.grammar_errors.row([dia, r.index, r.raw, r.detail])
 
-        relatorio = self._report(dia, status, status_correcao, raciocinio, plano_linhas, erros,
-                                 erros_finais, correcao, so_prefixo, execucao, moedas_inicio,
-                                 apodreceram, check)
-        self.folder.json(rel / "relatorio.json", relatorio)
-        self.folder.json(rel / "plano.json", {"plano": plano_linhas, "raciocinio": raciocinio,
-                                               "erros_validacao": erros,
-                                               "erros_apos_correcao": erros_finais,
-                                               "executado_so_prefixo_valido": so_prefixo})
-        self.folder.text(rel / "caderno.md", self._notebook_md(dia, check))
-        self.folder.json(rel / "chamadas.json", {**self._timing_summary(),
-                                                 "segundos_execucao_jogo": round(segundos_execucao, 1)})
-        self._action_rows(dia, execucao)
-        self._metrics_row(dia, status, relatorio, execucao, apodreceram, check, churn,
-                          moedas_inicio, segundos_execucao)
-        logger.info("dia %d fim | %s | moedas %d -> %d | estamina na cama %d | LLM %.0fs em %d "
-                    "chamada(s), jogo %.0fs%s", dia, status, moedas_inicio, s.coins,
-                    execucao.stamina_at_bed, self._day_calls["segundos"], self._day_calls["chamadas"],
-                    segundos_execucao, " | RETORNO FORCADO" if execucao.forced_return else "")
-        return relatorio
+        vendas = [r for r in execucao.results if r.verb == "VENDER" and r.effective]
+        partes, c, t = execucao.stamina_parts, self._day_calls, self.totals
+        for code in (GRAMMAR, CONTEXT, RESOURCE):
+            t[code] += execucao.count(code)
+        t["dias_perdidos"] += out.status != LLM_OK
+        t["dias_timeout"] += out.status == LLM_TIMEOUT
+        t["dias_truncados"] += execucao.truncated
+        f.days.row([
+            dia, seasons.season_at(dia).key, out.status, int(out.status != LLM_OK), moedas_inicio,
+            s.coins, len(execucao.results), execucao.count(OK), execucao.count(PARTIAL),
+            execucao.count(GRAMMAR), execucao.count(CONTEXT), execucao.count(RESOURCE),
+            execucao.count(TRUNCATED), int(execucao.truncated),
+            execucao.stamina_start - execucao.stamina_at_bed,
+            *(partes[p] for p in feedback.STAMINA_PARTS), execucao.stamina_at_bed,
+            "+".join(sorted(execucao.plot_zones_visited)), sum(r.effective for r in vendas),
+            sum(r.below_base for r in vendas), sum(apodreceram.values()),
+            len(s.game.field.plots), len(conhecimento.lines), conhecimento.new_since(anterior),
+            conhecimento.removed_since(anterior), conhecimento.cut, c["chamadas"],
+            f"{c['segundos']:.1f}", f"{c['maior_chamada']:.1f}", f"{segundos_execucao:.1f}",
+            c["tokens_in"], c["tokens_out"], f"{c['custo']:.6f}",
+        ])
 
     # --------------------------------------------------------------- chamadas
 
-    def _call(self, mensagens, dia, tipo, prefixo, chaves):
-        """Chama o modelo com as tentativas. Devolve (status, json, conteudo)."""
+    def _call(self, mensagens, dia, tipo, prefixo, chaves, problema) -> Outcome:
+        """Chama o modelo com as tentativas e confere a resposta."""
+        ultimo = Outcome(LLM_API_ERROR)
         for tentativa in range(1, self.max_attempts + 1):
             logger.info("dia %d: chamada %s (tentativa %d)", dia, tipo, tentativa)
-            # Se a espera passar do prazo, o faulthandler grava a pilha de todas as
-            # threads: nas runs com janela a thread principal ja travou aqui dezenas de
-            # segundos, e isso mostra exatamente onde.
             comeco, t0 = datetime.now(), time.monotonic()
+            # Se a espera passar do prazo, a pilha de todas as threads vai para o
+            # travamentos.log: foi assim que se achou o join() travado nas runs reais.
             with open(self.folder.root / "travamentos.log", "a", encoding="utf-8") as trava:
                 faulthandler.dump_traceback_later(self.api_timeout + 15, repeat=False, file=trava)
                 try:
                     r = self.client.complete(mensagens, wait=self._pump)
                 finally:
                     faulthandler.cancel_dump_traceback_later()
-            # O cliente real ja mede; qualquer outro (ou um futuro) fica medido aqui.
             if r.started_at is None or r.finished_at is None:
                 r.started_at, r.finished_at = comeco, datetime.now()
                 r.duration = time.monotonic() - t0
@@ -252,31 +312,31 @@ class LLMRun:
             self._count_call(r)
 
             if r.status == TIMEOUT:
-                return LLM_TIMEOUT, None, ""
-            if r.status != OK:
+                return Outcome(LLM_TIMEOUT, candidate=ultimo.candidate)
+            if r.status != HTTP_OK:
                 logger.warning("dia %d: %s (%s) %s", dia, r.status, r.http_status, r.error[:200])
                 if r.retryable and tentativa < self.max_attempts:
                     self._wait(self.retry_wait)
                     continue
-                return LLM_API_ERROR, None, ""
+                return Outcome(LLM_API_ERROR, candidate=ultimo.candidate)
+
             try:
-                return LLM_OK, extract_json(r.content, chaves), r.content
+                dados = extract_json(r.content or r.reasoning, chaves)
+                motivo = problema(dados)
             except ParseError as erro:
-                # Alguns modelos de raciocinio escrevem a resposta so no raciocinio.
-                try:
-                    return LLM_OK, extract_json(r.reasoning, chaves), r.reasoning
-                except ParseError:
-                    pass
-                logger.warning("dia %d: JSON invalido (%s)", dia, erro)
-                if tentativa < self.max_attempts:
-                    mensagens = mensagens + [
-                        {"role": "assistant", "content": r.content or "(vazio)"},
-                        {"role": "user", "content": f"A resposta nao trouxe um objeto JSON "
-                                                    f"valido com as chaves {', '.join(chaves)} "
-                                                    f"({erro}). Responda apenas com o JSON."}]
-                    continue
-                return LLM_BAD_JSON, None, ""
-        return LLM_API_ERROR, None, ""
+                dados, motivo = None, str(erro)
+            if motivo is None:
+                return Outcome(LLM_OK, parsed=dados)
+
+            ultimo = Outcome(LLM_BAD_JSON, candidate=dados or ultimo.candidate, problem=motivo)
+            logger.warning("dia %d: resposta reprovada (%s)", dia, motivo)
+            if tentativa < self.max_attempts:
+                mensagens = mensagens + [
+                    {"role": "assistant", "content": r.content or "(vazio)"},
+                    {"role": "user", "content": f"Resposta rejeitada: {motivo}. Responda "
+                                                f"SOMENTE com o objeto JSON pedido, com as "
+                                                f"chaves {', '.join(chaves)}."}]
+        return ultimo
 
     def _timing_summary(self) -> dict:
         tempos = [c["segundos"] for c in self._day_timings]
@@ -294,11 +354,7 @@ class LLMRun:
             alvo["custo"] += r.cost or 0
 
     def _pump(self) -> None:
-        """Atende a janela enquanto o modelo pensa, sem desenhar nem gravar.
-
-        Sem isso o Windows marca a janela como "Nao respondendo" em 5 s, e fechar
-        essa caixa mata a run -- foi o que aconteceu na primeira run de 30 dias.
-        """
+        """Atende a janela enquanto o modelo pensa, sem desenhar nem gravar."""
         game = self.session.game
         game._handle_events()
         if not game.running:
@@ -310,124 +366,43 @@ class LLMRun:
             self._pump()
             time.sleep(0.05)
 
-    # -------------------------------------------------------------- relatorio
-
-    def _report(self, dia, status, status_correcao, raciocinio, plano, erros, erros_finais,
-                correcao, so_prefixo, execucao, moedas_inicio, apodreceram, check) -> dict:
-        s = self.session
-        relatorio = {
-            "dia": dia,
-            "status_llm": status,
-            "dia_perdido": status != LLM_OK,
-        }
-        if status == LLM_TIMEOUT:
-            relatorio["aviso"] = (f"A sua resposta nao chegou a tempo (timeout: limite de "
-                                  f"{self.api_timeout:.0f} s, ou o provedor desistiu antes). "
-                                  "O jogador dormiu sem fazer nada nesse dia. Respostas mais "
-                                  "curtas e diretas chegam mais rapido.")
-        elif status != LLM_OK:
-            relatorio["aviso"] = (f"Nao foi possivel usar a sua resposta ({status}). O jogador "
-                                  "dormiu sem fazer nada nesse dia.")
-        relatorio.update({
-            "plano_recebido": plano if isinstance(plano, list) else [],
-            "erros_validacao": erros,
-            "correcao_usada": correcao,
-        })
-        if correcao:
-            relatorio["status_correcao"] = status_correcao
-            relatorio["erros_apos_correcao"] = erros_finais
-            relatorio["executado_so_prefixo_valido"] = so_prefixo
-        relatorio.update({
-            "acoes": [r.as_dict() for r in execucao.results],
-            "plano_concluido": status == LLM_OK and not so_prefixo and execucao.completed,
-            "retorno_forcado": execucao.forced_return,
-        })
-        if execucao.forced_return:
-            nao_feitas = [r.action for r in execucao.results if r.status != DONE]
-            relatorio.update({
-                "retorno_forcado_em": execucao.forced_return_at,
-                "retorno_forcado_celula": list(execucao.forced_return_cell),
-                "acoes_nao_finalizadas_por_estamina": nao_feitas,
-            })
-        relatorio.update({
-            "estamina_inicio": execucao.stamina_start,
-            "estamina_gasta": execucao.stamina_start - execucao.stamina_at_bed,
-            "estamina_sobrando_ao_dormir": execucao.stamina_at_bed,
-            "passos_de_volta_para_a_cama": execucao.steps_home,
-            "moedas_inicio": moedas_inicio,
-            "moedas_fim": s.coins,
-            "apodreceram_na_virada": [{"cultivo": c, "quantidade": n}
-                                      for c, n in sorted(apodreceram.items())],
-            "caderno_linhas_rejeitadas": check.rejected,
-        })
-        return relatorio
-
-    def _notebook_md(self, dia: int, check) -> str:
-        linhas = [f"# Caderno ao fim do dia {dia}", ""]
-        linhas += [f"- {l}" for l in self.notebook] or ["(vazio)"]
-        if check.rejected:
-            linhas += ["", "## Rejeitadas", ""]
-            linhas += [f"- {r['linha']}  _({r['motivo']})_" for r in check.rejected]
-        return "\n".join(linhas) + "\n"
-
-    def _action_rows(self, dia: int, execucao) -> None:
-        for i, r in enumerate(execucao.results, 1):
-            self.folder.actions.row([dia, i, r.action, r.status, r.requested, r.effective,
-                                     r.reason or "", r.stamina_before, r.stamina_after,
-                                     r.steps, r.coins, (r.detail or "").replace("\n", " ")])
-
-    def _metrics_row(self, dia, status, relatorio, execucao, apodreceram, check, churn,
-                     moedas_inicio, segundos_execucao) -> None:
-        res = execucao.results
-        vendas = [r for r in res if r.action.upper().startswith("VENDER") and r.effective]
-        self.totals["retornos_forcados"] += execucao.forced_return
-        self.totals["acoes_truncadas"] += sum(r.status == PARTIAL for r in res)
-        self.totals["erros_validacao"] += len(relatorio["erros_validacao"])
-        self.totals["dias_perdidos"] += status != LLM_OK
-        self.totals["dias_timeout"] += status == LLM_TIMEOUT
-        c = self._day_calls
-        self.folder.metrics.row([
-            dia, seasons.season_at(dia).key, status, int(status != LLM_OK), moedas_inicio,
-            self.session.coins, len(relatorio["erros_validacao"]), int(relatorio["correcao_usada"]),
-            len(res), sum(r.status == DONE for r in res), sum(r.status == PARTIAL for r in res),
-            sum(r.status == SKIPPED for r in res), int(relatorio["plano_concluido"]),
-            int(execucao.forced_return), relatorio["estamina_gasta"], execucao.stamina_at_bed,
-            sum(r.effective for r in vendas), sum(r.below_base for r in vendas),
-            len({r.action.split()[1].lower() for r in vendas}), sum(apodreceram.values()),
-            len(self.notebook), len(check.rejected), churn, c["chamadas"],
-            f"{c['segundos']:.1f}", f"{c['maior_chamada']:.1f}", f"{segundos_execucao:.1f}",
-            c["tokens_in"], c["tokens_out"], f"{c['custo']:.6f}",
-        ])
-
     # -------------------------------------------------------------------- fim
 
     def _write_config(self) -> None:
+        # Os templates usados vao junto: editar o .md muda a proxima run, entao a
+        # pasta precisa guardar exatamente o que esta rodou.
+        (self.folder.root / "prompts").mkdir(exist_ok=True)
+        for caminho in (self.prompt_strategy, self.prompt_day):
+            shutil.copy2(caminho, self.folder.root / "prompts" / caminho.name)
         self.folder.json("config.json", {
             "pasta": self.folder.name,
             "inicio": self.folder.started.isoformat(timespec="seconds"),
-            "modelo": self.model, "modo": self.mode, "seed": self.seed,
-            "dias": self.days, "tempo_real": self.realtime, "video": self.video,
+            "modelo": self.model, "modo": self.mode, "seed": self.seed, "dias": self.days,
+            "tempo_real": self.realtime, "video": self.video,
             "janela": os.environ.get("SDL_VIDEODRIVER") != "dummy",
             "api_timeout_segundos": self.api_timeout, "tentativas_por_chamada": self.max_attempts,
-            "temperatura": settings.TEMPERATURE, "max_tokens": settings.MAX_TOKENS,
-            "reserva_de_estamina": settings.STAMINA_RESERVE,
-            "caderno_max_linhas": settings.NOTEBOOK_MAX_LINES,
-            "documentos_de_regra": list(settings.RULE_DOCS),
+            "temperatura": settings.TEMPERATURE, "reasoning_effort": settings.REASONING_EFFORT,
+            "json_forcado": settings.RESPONSE_FORMAT_JSON, "max_tokens": settings.MAX_TOKENS,
+            "estrategia_max_caracteres": settings.STRATEGY_MAX_CHARS,
+            "conhecimento_max_linhas": settings.KNOWLEDGE_MAX_LINES,
+            "diario_dias": settings.DIARY_DAYS, "reserva_de_estamina": settings.STAMINA_RESERVE,
+            "prompts": [str(self.prompt_strategy), str(self.prompt_day)],
             "base_de_conhecimento": str(self.knowledge_path) if self.knowledge_path else None,
-            "base_de_conhecimento_conteudo": self.knowledge,
+            "base_de_conhecimento_conteudo": self.knowledge_base,
         })
 
     def _finish(self, dia_final: int, interrompida: str | None) -> dict:
         moedas = self.session.coins if self.session else 0
+        no_chao = len(self.session.game.field.plots) if self.session else 0
         if self.session is not None:
             self.session.close()
         f = self.folder
         trava = f.root / "travamentos.log"
         if trava.exists() and trava.stat().st_size == 0:
             trava.unlink()                     # so fica na pasta se houve travamento
-        f.text("caderno_final.txt",
-               f"# Caderno final da run {f.name} (dia {dia_final}, modelo {self.model})\n"
-               + "\n".join(self.notebook) + ("\n" if self.notebook else ""))
+        f.text("conhecimento_final.txt",
+               f"# Conhecimento final da run {f.name} (dia {dia_final}, modelo {self.model})\n"
+               + "\n".join(self.knowledge) + ("\n" if self.knowledge else ""))
 
         t = self.totals
         resumo = {
@@ -436,16 +411,17 @@ class LLMRun:
             "modo": self.mode, "seed": self.seed, "dias_jogados": dia_final,
             "horizonte": self.days, "moedas_fim": moedas,
             "dias_perdidos": t["dias_perdidos"], "dias_timeout": t["dias_timeout"],
-            "retornos_forcados": t["retornos_forcados"], "acoes_truncadas": t["acoes_truncadas"],
-            "erros_validacao": t["erros_validacao"], "chamadas": t["chamadas"],
+            "dias_truncados": t["dias_truncados"], "no_chao_no_fim": no_chao,
+            "canteiros_usados": "+".join(sorted(self.plot_zones_used)) or "nenhum",
+            "erros_gramatica": t[GRAMMAR], "erros_contexto": t[CONTEXT],
+            "erros_recurso": t[RESOURCE], "chamadas": t["chamadas"],
             "segundos_llm_total": f"{t['segundos']:.1f}",
             "segundos_por_chamada_media": (f"{t['segundos'] / t['chamadas']:.1f}"
                                            if t["chamadas"] else "0.0"),
             "segundos_maior_chamada": f"{t['maior_chamada']:.1f}",
             "segundos_run": f"{(datetime.now() - f.started).total_seconds():.1f}",
-            "tokens_in": t["tokens_in"],
-            "tokens_out": t["tokens_out"], "custo_usd": f"{t['custo']:.6f}",
-            "interrompida": interrompida or "",
+            "tokens_in": t["tokens_in"], "tokens_out": t["tokens_out"],
+            "custo_usd": f"{t['custo']:.6f}", "interrompida": interrompida or "",
         }
         f.append_summary(resumo)
         f.text("LEIAME.md", _readme(resumo, self))
@@ -453,6 +429,25 @@ class LLMRun:
                     interrompida or "completa")
         f.close()
         return resumo
+
+
+def _code_summary(execucao: DayExecution) -> str:
+    contagem = Counter(r.code for r in execucao.results)
+    return ", ".join(f"{n} {c}" for c, n in contagem.items()) or "sem comandos"
+
+
+def _knowledge_md(dia: int, atual: list[str], conhecimento, anterior: list[str]) -> str:
+    linhas = [f"# Conhecimento ao fim do dia {dia}", ""]
+    linhas += [f"- {l}" for l in atual] or ["(vazio)"]
+    novas = [l for l in atual if l not in anterior]
+    saiu = [l for l in anterior if l not in atual]
+    if novas:
+        linhas += ["", "## Novas hoje", ""] + [f"- {l}" for l in novas]
+    if saiu:
+        linhas += ["", "## Removidas hoje", ""] + [f"- {l}" for l in saiu]
+    if conhecimento.cut:
+        linhas += ["", f"_{conhecimento.cut} linha(s) acima do teto foram cortadas._"]
+    return "\n".join(linhas) + "\n"
 
 
 def _duracao(segundos) -> str:
@@ -473,14 +468,17 @@ def _readme(r: dict, run: "LLMRun") -> str:
 | Semente | {r['seed']} |
 | Dias jogados | {r['dias_jogados']} de {r['horizonte']} |
 | **Moedas no fim** | **{r['moedas_fim']}** |
+| Estrategia | `{run.strategy or '(nenhuma)'}` |
 | Dias perdidos (sem plano) | {r['dias_perdidos']} (timeout: {r['dias_timeout']}) |
-| Retornos forcados por estamina | {r['retornos_forcados']} |
-| Acoes truncadas | {r['acoes_truncadas']} |
-| Erros de validacao | {r['erros_validacao']} |
+| Dias truncados pela stamina | {r['dias_truncados']} |
+| Plantas no chao no fim | {r['no_chao_no_fim']} |
+| Canteiros usados | {r['canteiros_usados']} |
+| Erros (gramatica / contexto / recurso) | {r['erros_gramatica']} / {r['erros_contexto']} / {r['erros_recurso']} |
 | Chamadas ao modelo | {r['chamadas']} |
 | Tempo esperando o modelo | {_duracao(r['segundos_llm_total'])} (media {r['segundos_por_chamada_media']} s por chamada, maior {r['segundos_maior_chamada']} s) |
 | Duracao total da run | {_duracao(r['segundos_run'])} |
 | Tokens (entrada / saida) | {r['tokens_in']} / {r['tokens_out']} |
+| Custo | US$ {r['custo_usd']} |
 | Inicio / fim | {r['inicio']} / {r['fim']} |
 | Situacao | {r['interrompida'] or 'completa'} |
 
@@ -489,15 +487,15 @@ def _readme(r: dict, run: "LLMRun") -> str:
 | Caminho | Conteudo |
 | --- | --- |
 | `config.json` | tudo que definiu a run, inclusive a base de conhecimento |
+| `prompts/` | os templates .md exatamente como estavam nesta run |
 | `agente.log` | log de texto completo |
-| `estrategia/` | prompt de sistema, prompt da estrategia, resposta bruta e a estrategia extraida |
-| `dias/dia_NNN/` | snapshot, prompt, respostas brutas (com raciocinio), plano, relatorio, caderno e `chamadas.json` (tempo de cada chamada e da execucao do jogo) |
-| `chamadas.csv` | uma linha por chamada ao modelo: inicio, fim, segundos, status, tokens |
-| `acoes.csv` | uma linha por acao executada |
-| `metricas.csv` | uma linha por dia |
+| `estrategia/` | prompt renderizado, respostas brutas, `estrategia.json` (analise, regras de bolso, estrategia) |
+| `dias/dia_NNN/` | `prompt.txt`, `estado.json`, respostas brutas (com raciocinio), `resposta.json`, `feedback.txt`, `relatorio.json`, `conhecimento.md`, `chamadas.json` |
+| `chamadas.csv` | uma linha por chamada: inicio, fim, segundos, status, tokens |
+| `comandos.csv` | uma linha por comando do plano, com o codigo do resultado |
+| `dias.csv` | uma linha por dia |
+| `erros_gramatica.csv` | todo comando fora da gramatica: sao pedidos de feature |
 | `jogo/` | os logs nativos do jogo (CSV e texto) |
 | `{video}` | a tela do jogo, em tempo de jogo |
-| `caderno_final.txt` | o caderno do ultimo dia, pronto para `--knowledge` numa proxima run |
-
-O prompt de sistema e o mesmo em todas as chamadas: esta so em `estrategia/prompt_system.txt`.
+| `conhecimento_final.txt` | o bloco de conhecimento do ultimo dia, pronto para `--knowledge` |
 """

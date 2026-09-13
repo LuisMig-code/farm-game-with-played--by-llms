@@ -7,17 +7,27 @@ tem flag na linha de comando (`run_llm.py --help`) pode ser sobreposto por ela.
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-DOCS_DIR = ROOT_DIR / "docs"
 ENV_FILE = ROOT_DIR / ".env"
+
+# Os prompts sao lidos destes .md em runtime: editar o arquivo muda a proxima run
+# sem tocar em Python.
+PROMPTS_DIR = ROOT_DIR / "prompts"
+PROMPT_STRATEGY = PROMPTS_DIR / "prompt_inicial.md"
+PROMPT_DAY = PROMPTS_DIR / "prompt_gaming.md"
 
 # ------------------------------------------------------------------- modelo
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 API_KEY_ENV = "OPEN_ROUTER_API_KEY"      # lido do ambiente ou do .env
-MODEL = "nvidia/nemotron-3.5-lightning:free"
-TEMPERATURE = 0
-# Modelos de raciocinio gastam tokens pensando antes de responder: um teto baixo
-# corta a resposta no meio do JSON.
-MAX_TOKENS = 20000
+MODEL = "openai/gpt-5.6-luna"
+# None = nao envia. O gpt-5.6-luna nao lista `temperature` nos parametros aceitos.
+TEMPERATURE: float | None = None
+# None = deixa o provedor decidir. Aceita "low", "medium" ou "high" nos modelos
+# que listam `reasoning_effort`.
+REASONING_EFFORT: str | None = None
+# Pede JSON de verdade ao provedor (`response_format`). Modelos que nao aceitam o
+# parametro caem no parser, que extrai o objeto do texto de qualquer jeito.
+RESPONSE_FORMAT_JSON = True
+MAX_TOKENS = 16000
 INCLUDE_REASONING = True                 # grava o raciocinio junto da resposta
 
 # -------------------------------------------------------------- chamadas
@@ -32,16 +42,15 @@ API_RETRY_WAIT_SECONDS = 5
 # ------------------------------------------------------------------ run
 DAYS = 121                     # ano completo + 1 dia de primavera
 MODES = ("principal", "sem_memoria")
-MODE = "principal"             # sem_memoria: o caderno entra sempre vazio
-NOTEBOOK_MAX_LINES = 20
-REASONING_MAX_CHARS = 800      # o raciocinio do dia e cortado nesse tamanho
+MODE = "principal"             # sem_memoria: o conhecimento entra sempre vazio
+
+STRATEGY_MAX_CHARS = 128       # o campo "estrategia", reinjetado todo dia
+KNOWLEDGE_MAX_LINES = 15       # o bloco "conhecimento", reescrito inteiro todo dia
+DIARY_DAYS = 5                 # janela do diario gerado pelo codigo
 
 # O jogo declara derrota com estamina 0 mesmo em cima da cama, entao o jogador
 # precisa CHEGAR em casa com pelo menos isso.
 STAMINA_RESERVE = 1
-
-# Documentos de regra enviados ao modelo, na ordem.
-RULE_DOCS = ("GAME_RULES.md", "CULTIVO.md", "COMERCIO.md", "ESTACOES.md")
 
 # ------------------------------------------------------------- execucao
 REALTIME = False               # False: passo fixo de 1/60s, video em tempo de jogo

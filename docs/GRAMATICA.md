@@ -16,7 +16,7 @@ código.
 ```
 <comando> ::= IR <zona>
             | COLHER [LIMITE <n>]
-            | PLANTAR <cultivo> (TUDO | LIMITE <n>)
+            | PLANTAR <cultivo> (TUDO | <n> | LIMITE <n>)
             | FERTILIZAR [LIMITE <n>]
             | LIMPAR [LIMITE <n>]
             | COMPRAR (<cultivo> | fertilizante) <n>
@@ -30,7 +30,7 @@ Um comando por elemento do array `plano`. Sem prosa, sem numeração, sem coorde
 | Verbos | `IR` `COLHER` `PLANTAR` `FERTILIZAR` `LIMPAR` `COMPRAR` `VENDER` |
 | Zonas | `cama` `loja` `canteiro_esquerdo` `canteiro_direito` |
 | Cultivos | `cenoura` `batata` `beterraba` `trigo` `melancia` |
-| Quantificadores | `TUDO` · `LIMITE <n>` |
+| Quantificadores | `TUDO` · `LIMITE <n>` · `<n>` (em `PLANTAR`, igual a `LIMITE <n>`; em `COMPRAR` e `VENDER`, a quantidade) |
 
 Maiúsculas e minúsculas são aceitas. Qualquer outro token é `ERRO_GRAMATICA`.
 
@@ -58,6 +58,9 @@ Maiúsculas e minúsculas são aceitas. Qualquer outro token é `ERRO_GRAMATICA`
 - **`COLHER`** sem `LIMITE` colhe todas as plantas prontas (e não podres) do canteiro. A célula fica
   livre na hora: plantar logo depois, na mesma viagem, é o uso esperado.
 - **`PLANTAR <cultivo> TUDO`** planta enquanto houver semente e célula livre.
+- **`PLANTAR <cultivo> <n>`** é o mesmo que `PLANTAR <cultivo> LIMITE <n>`: planta **até** `n`,
+  parando antes se acabar a semente, a célula livre ou a stamina. Era o erro de gramática mais comum
+  dos modelos — `VENDER` e `COMPRAR` já aceitavam o número direto — e passou a valer.
 - **`FERTILIZAR`** age em plantas ainda crescendo e não fertilizadas, até o limite de 3 por dia.
 - **`LIMPAR`** arranca plantas podres: não rende nada, só libera a célula.
 - Dentro do canteiro, **o alvo é sempre a célula mais próxima** (empate: menor coluna, depois menor

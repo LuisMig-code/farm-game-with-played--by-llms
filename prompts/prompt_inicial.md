@@ -73,23 +73,6 @@ foi PLANTADA, mesmo que a estação vire depois.
 
 {BASE_DE_CONHECIMENTO}
 
-## O QUE PENSAR
-
-Considere pelo menos:
-
-1. O prazo de {DIAS} dias. Quantos ciclos completos cada cultivo consegue
-   fechar? Qual o último dia útil para plantar cada um e ainda vender a tempo?
-2. Ciclo curto gira o dinheiro mais vezes; margem alta rende mais por célula
-   e por viagem. A saturação da loja limita quanto de um mesmo cultivo vale
-   vender por dia. Com {DIAS} dias, o que pesa mais?
-3. Capital inicial. Com {MOEDAS_INICIAIS} moedas, os primeiros dias são
-   limitados por dinheiro, não por stamina. Como sair disso rápido?
-4. Um canteiro ou os dois? O direito custa mais stamina por viagem.
-5. Validade. O que fica pronto e não é colhido apodrece — quantas células você
-   consegue colher antes disso?
-6. As estações que a partida atravessa, e o fim. Nos últimos dias o que importa
-   é o que amadurece a tempo — e sobra uma viagem para vender.
-
 ## FORMATO DA RESPOSTA
 
 Responda com este JSON e nada mais:

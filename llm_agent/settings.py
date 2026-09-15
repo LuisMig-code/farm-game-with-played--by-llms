@@ -44,7 +44,7 @@ DAYS = 121                     # ano completo + 1 dia de primavera
 MODES = ("principal", "sem_memoria")
 MODE = "principal"             # sem_memoria: o conhecimento entra sempre vazio
 
-STRATEGY_MAX_CHARS = 128       # o campo "estrategia", reinjetado todo dia
+STRATEGY_MAX_CHARS = 200       # o campo "estrategia", reinjetado todo dia
 KNOWLEDGE_MAX_LINES = 15       # o bloco "conhecimento", reescrito inteiro todo dia
 DIARY_DAYS = 5                 # janela do diario gerado pelo codigo
 

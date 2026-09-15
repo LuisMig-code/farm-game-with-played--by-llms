@@ -25,7 +25,7 @@ A chave nunca é gravada.
 | `--mode` | `principal`: o bloco de conhecimento que o modelo escreve volta no prompt do dia seguinte.<br>`sem_memoria`: o conhecimento chega sempre vazio (o modelo continua escrevendo; só não recebe de volta) | `principal` | liga ou desliga a memória entre os dias |
 | `--knowledge` | caminho de um arquivo de texto UTF-8 que exista, ex.: `runs_llm/<pasta>/conhecimento_final.txt`.<br>Arquivo inexistente encerra o comando antes de começar | — (sem base) | base de conhecimento prévia, anexada só à chamada de estratégia |
 | `--timeout` | segundos, número > 0 (aceita decimais), ex.: `120`, `360`, `600`.<br>O OpenRouter costuma desistir sozinho por volta de 300 s, o que também conta como timeout | 360 | espera máxima por chamada; estourou, o jogador dorme sem agir e a chamada não é repetida |
-| `--attempts` | inteiro ≥ 1, ex.: `1` (nunca repete), `3`, `5` | 3 | quantas vezes chamar quando a resposta chega mas não serve: JSON inválido, estratégia acima de 128 caracteres, HTTP 429 ou 5xx |
+| `--attempts` | inteiro ≥ 1, ex.: `1` (nunca repete), `3`, `5` | 3 | quantas vezes chamar quando a resposta chega mas não serve: JSON inválido, estratégia acima de 200 caracteres, HTTP 429 ou 5xx |
 | `--speed` | número > 0 até ~7,4 (`Session.max_speed()` a 60 fps), ex.: `1` (velocidade do jogo), `2`, `4`, `7`.<br>Fora disso a run recusa começar | 2 | velocidade das ações na tela e no vídeo: andar, plantar, colher, fertilizar, limpar, dormir. Não muda o resultado da partida |
 | `--headless` | sem valor: presente liga | desligado (abre a janela) | roda sem janela; o vídeo é gravado igual. O mais estável para runs longas |
 | `--no-video` | sem valor: presente liga | desligado (grava) | não grava o `video.mp4` |
@@ -81,12 +81,12 @@ na hora. Cada run guarda uma cópia dos templates que usou, em `prompts/` dentro
       ┌─ CHAMADA INICIAL (uma vez, antes do dia 1) ────────────┐
       │  regras + custos + cultivos + estações + loja           │
       │  (+ base de conhecimento)  ->  analise, regras_de_bolso │
-      │  "estrategia": máx. 128 caracteres, é a âncora          │
+      │  "estrategia": máx. 200 caracteres, é a âncora          │
       └─────────────────────────────────────────────────────────┘
                               │
                               v
       ┌─ POR DIA ───────────────────────────────────────────────┐
-      │  código monta:  estratégia (128 caracteres)              │
+      │  código monta:  estratégia (200 caracteres)              │
       │                 estado do jogo e loja (calculados)       │
       │                 prazo por cultivo (calculado)            │
       │                 feedback de ontem                        │
@@ -120,7 +120,7 @@ antes de cada ação e, sem folga, corta o resto do plano. O corte vira feedback
 
 **Nunca se pede reenvio de plano.** Comando inválido é descartado, o resto executa e o erro volta
 amanhã. Só se repete uma chamada cuja resposta **chegou mas não é usável** — JSON que não parseia,
-estratégia acima de 128 caracteres, HTTP 429/5xx.
+estratégia acima de 200 caracteres, HTTP 429/5xx.
 
 **Memória: três objetos com regras diferentes.**
 
@@ -157,7 +157,7 @@ Dois blocos do prompt diário existem para o modelo não ser pego de surpresa:
 | Sem resposta em `--timeout` segundos | **não repete**: o jogador dorme e o feedback do dia seguinte diz |
 | Provedor desiste por tempo (HTTP 504/408) | igual ao timeout |
 | JSON inválido, 429, 5xx | tenta de novo, até `--attempts` |
-| Estratégia acima de 128 caracteres | rejeitada e pedida de novo; esgotadas as tentativas, usa a última cortada no teto |
+| Estratégia acima de 200 caracteres | rejeitada e pedida de novo; esgotadas as tentativas, usa a última cortada no teto |
 | Tentativas esgotadas num dia | dia perdido: o jogador dorme sem agir |
 
 Enquanto espera o modelo, o jogo fica parado e o gravador pausado. Se a espera passar do prazo, a
@@ -246,6 +246,7 @@ A lógica é a mesma; o jogo daqui tem mais regras, e isso pede extensões:
 | 4 cultivos, colheita de 2–3 unidades | 5 cultivos, 1 unidade por colheita | regras deste jogo |
 | sem apodrecimento | validade + `LIMPAR [LIMITE n]` | planta pronta apodrece |
 | sem fertilizante | `FERTILIZAR [LIMITE n]`, `COMPRAR fertilizante n` | regras deste jogo |
+| `PLANTAR <cultivo> (TUDO \| LIMITE n)` | também `PLANTAR <cultivo> n`, igual a `LIMITE n` | era o erro de gramática mais comum nas runs |
 | sem estações | prazo por cultivo considera estação e virada do inverno | regras deste jogo |
 | loja sem limites | promoção, estoque, caixa e saturação no prompt e no feedback | regras deste jogo |
 | folga de 2 na volta | conta exata com o custo da ação + reserva de 1 | o custo da ação já entra na conta |

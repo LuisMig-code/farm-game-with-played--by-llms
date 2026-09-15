@@ -255,7 +255,7 @@ Tudo que tem flag no `run_llm.py` pode ser sobreposto na linha de comando.
 | --- | --- | --- |
 | `DAYS` | 121 | dias da partida (`--days`) |
 | `MODE` | `"principal"` | `sem_memoria` manda o conhecimento sempre vazio (`--mode`) |
-| `STRATEGY_MAX_CHARS` | 128 | tamanho máximo da estratégia reinjetada todo dia |
+| `STRATEGY_MAX_CHARS` | 200 | tamanho máximo da estratégia reinjetada todo dia |
 | `KNOWLEDGE_MAX_LINES` | 15 | linhas do bloco de conhecimento |
 | `DIARY_DAYS` | 5 | dias no diário que o prompt mostra |
 | `STAMINA_RESERVE` | 1 | estamina que o jogador sempre guarda para chegar vivo na cama |

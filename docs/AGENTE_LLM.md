@@ -17,21 +17,21 @@ venv/Scripts/python.exe run_llm.py --seed 42 --days 30 --headless
 A chave vem de `OPEN_ROUTER_API_KEY`, no ambiente ou no `.env` da raiz — que está no `.gitignore`.
 A chave nunca é gravada.
 
-| Flag | Padrão | O que faz |
-| --- | --- | --- |
-| `--seed` | a do jogo | semente do cenário ([SEMENTE.md](SEMENTE.md)) |
-| `--days` | 121 | quantos dias jogar |
-| `--model` | `openai/gpt-5.6-luna` | id do modelo no OpenRouter |
-| `--mode` | `principal` | `sem_memoria` manda o conhecimento sempre vazio |
-| `--knowledge` | — | `.txt` de base de conhecimento, anexado à chamada inicial |
-| `--timeout` | 360 | segundos de espera por chamada |
-| `--attempts` | 3 | tentativas quando a resposta chega mas não serve |
-| `--headless` | — | sem janela; o vídeo é gravado igual. O mais estável para runs longas |
-| `--no-video` | — | não grava o MP4 |
-| `--realtime` | — | roda a 60 fps de verdade em vez de acelerado |
-| `--speed` | 2 | velocidade das ações na tela: andar, plantar, colher, fertilizar, limpar, dormir. 1 = a do jogo |
-| `--allow-sleep` | — | deixa o Windows suspender por inatividade durante a run |
-| `--runs-dir` | `runs_llm/` | onde criar a pasta da run |
+| Flag | Valores possíveis | Padrão | O que faz |
+| --- | --- | --- | --- |
+| `--seed` | qualquer inteiro, ex.: `42`, `2026`.<br>Sem a flag vale `FARM_SEED` e depois o `SEED` de `farm/settings.py`; se nenhum definir, um número é sorteado e fica no nome da pasta da run | a do jogo (`2026`) | semente do cenário: mesma semente, mesmo estoque e mesmas promoções em cada dia ([SEMENTE.md](SEMENTE.md)) |
+| `--days` | inteiro ≥ 1, ex.: `3` (teste), `30` (um mês), `120` (o ano), `121` (o ano + 1 dia de primavera).<br>Cada dia é uma chamada ao modelo | 121 | quantos dias jogar; a partida acaba no fim desse dia |
+| `--model` | qualquer id do OpenRouter no formato `provedor/modelo`, ex.: `openai/gpt-5.6-luna`, `nvidia/nemotron-3.5-lightning:free` | `openai/gpt-5.6-luna` | o modelo que joga |
+| `--mode` | `principal`: o bloco de conhecimento que o modelo escreve volta no prompt do dia seguinte.<br>`sem_memoria`: o conhecimento chega sempre vazio (o modelo continua escrevendo; só não recebe de volta) | `principal` | liga ou desliga a memória entre os dias |
+| `--knowledge` | caminho de um arquivo de texto UTF-8 que exista, ex.: `runs_llm/<pasta>/conhecimento_final.txt`.<br>Arquivo inexistente encerra o comando antes de começar | — (sem base) | base de conhecimento prévia, anexada só à chamada de estratégia |
+| `--timeout` | segundos, número > 0 (aceita decimais), ex.: `120`, `360`, `600`.<br>O OpenRouter costuma desistir sozinho por volta de 300 s, o que também conta como timeout | 360 | espera máxima por chamada; estourou, o jogador dorme sem agir e a chamada não é repetida |
+| `--attempts` | inteiro ≥ 1, ex.: `1` (nunca repete), `3`, `5` | 3 | quantas vezes chamar quando a resposta chega mas não serve: JSON inválido, estratégia acima de 128 caracteres, HTTP 429 ou 5xx |
+| `--speed` | número > 0 até ~7,4 (`Session.max_speed()` a 60 fps), ex.: `1` (velocidade do jogo), `2`, `4`, `7`.<br>Fora disso a run recusa começar | 2 | velocidade das ações na tela e no vídeo: andar, plantar, colher, fertilizar, limpar, dormir. Não muda o resultado da partida |
+| `--headless` | sem valor: presente liga | desligado (abre a janela) | roda sem janela; o vídeo é gravado igual. O mais estável para runs longas |
+| `--no-video` | sem valor: presente liga | desligado (grava) | não grava o `video.mp4` |
+| `--realtime` | sem valor: presente liga | desligado (acelerado) | roda a 60 fps de relógio em vez de o mais rápido que a máquina deixar |
+| `--allow-sleep` | sem valor: presente liga | desligado (o PC não suspende) | deixa o Windows suspender por inatividade durante a run |
+| `--runs-dir` | caminho de uma pasta; é criada se não existir.<br>No Windows prefira caminhos curtos: o limite é de 260 caracteres | `runs_llm/` | onde criar a pasta da run e o `resumo.csv` |
 
 Os padrões moram em [`llm_agent/settings.py`](../llm_agent/settings.py), separado de
 `farm/settings.py` para o jogo continuar intocado. Lá também ficam `TEMPERATURE` (não enviada por

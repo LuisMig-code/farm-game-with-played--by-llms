@@ -1,6 +1,6 @@
 """Uma run completa, no laco do Projeto Fazenda.
 
-    chamada inicial (1x): regras + prazo + custos -> analise, regras_de_bolso, estrategia (<=128)
+    chamada inicial (1x): regras + prazo + custos -> analise, regras_de_bolso, estrategia (<=200)
     cada dia:  estrategia + estado calculado + prazo + feedback de ontem + diario + conhecimento
                -> leitura_do_dia, conhecimento (reescrito, <=15), plano
                -> interpretador executa em ordem, descarta o invalido, reserva a volta, dorme

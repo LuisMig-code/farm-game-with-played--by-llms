@@ -77,7 +77,7 @@ destas listas é erro.
 
   IR <cama|loja|canteiro_esquerdo|canteiro_direito>
   COLHER [LIMITE <n>]
-  PLANTAR <cenoura|batata|beterraba|trigo|melancia> <TUDO|LIMITE <n>>
+  PLANTAR <cenoura|batata|beterraba|trigo|melancia> <TUDO|<n>|LIMITE <n>>
   FERTILIZAR [LIMITE <n>]
   LIMPAR [LIMITE <n>]
   COMPRAR <cenoura|batata|beterraba|trigo|melancia|fertilizante> <n>
@@ -93,6 +93,7 @@ Regras de execução:
   funcionam em `loja`. Vender ANTES de comprar, ou não haverá moedas.
 - COLHER sem LIMITE colhe tudo que estiver pronto no canteiro.
 - PLANTAR ... TUDO planta enquanto houver semente e célula livre.
+  PLANTAR <cultivo> <n> planta até n (o mesmo que LIMITE <n>).
 - FERTILIZAR age sobre plantas ainda crescendo e não fertilizadas (ver
   FERTILIZANTE acima).
 - LIMPAR arranca plantas podres (não rende nada, libera a célula).

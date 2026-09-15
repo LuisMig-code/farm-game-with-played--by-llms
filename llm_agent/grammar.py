@@ -2,7 +2,7 @@
 
     IR <cama|loja|canteiro_esquerdo|canteiro_direito>
     COLHER [LIMITE <n>]
-    PLANTAR <cultivo> <TUDO|LIMITE <n>>
+    PLANTAR <cultivo> <TUDO|<n>|LIMITE <n>>     (<n> e o mesmo que LIMITE <n>)
     FERTILIZAR [LIMITE <n>]
     LIMPAR [LIMITE <n>]
     COMPRAR <cultivo|fertilizante> <n>
@@ -47,7 +47,7 @@ class GrammarError(ValueError):
 class Command:
     """Um comando ja entendido.
 
-    `limit` = LIMITE n (teto); `amount` = n exato (COMPRAR, VENDER n);
+    `limit` = LIMITE n, ou n em PLANTAR (teto); `amount` = n exato (COMPRAR, VENDER n);
     `all_` = TUDO, ou ausencia de LIMITE em COLHER/FERTILIZAR/LIMPAR.
     """
     raw: str
@@ -94,14 +94,18 @@ def parse(line) -> Command:
         return Command(raw, verb, limit=_limit(args, forma))
 
     if verb == "PLANTAR":
-        forma = "PLANTAR <cultivo> <TUDO|LIMITE <n>>"
+        forma = "PLANTAR <cultivo> <TUDO|<n>|LIMITE <n>>"
         if len(args) not in (2, 3):
             raise GrammarError(f"formato errado: {forma}")
         crop = _crop(args[0])
         if len(args) == 2:
-            if args[1].upper() != ALL:
-                raise GrammarError(f"esperava TUDO ou LIMITE <n> depois do cultivo: {forma}")
-            return Command(raw, verb, crop=crop, all_=True)
+            if args[1].upper() == ALL:
+                return Command(raw, verb, crop=crop, all_=True)
+            if args[1].isdigit():
+                # `PLANTAR trigo 5` e o mesmo que `LIMITE 5`: um teto, nao uma cota.
+                # Era o erro de gramatica mais comum dos modelos.
+                return Command(raw, verb, crop=crop, limit=_positive(args[1], forma))
+            raise GrammarError(f"esperava TUDO, <n> ou LIMITE <n> depois do cultivo: {forma}")
         return Command(raw, verb, crop=crop, limit=_limit(args[1:], forma))
 
     if verb == "COMPRAR":

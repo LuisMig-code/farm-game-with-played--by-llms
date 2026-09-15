@@ -13,8 +13,8 @@ volta. A run começa no dia 1, na primavera.
 Depois do dia 120 o ciclo recomeça na primavera. Como tudo é derivado do dia, não há estado
 guardado: o dia 121 é primavera pelo mesmo cálculo que faz o dia 1 ser.
 
-**Por enquanto isso é só visual.** Nenhuma mecânica muda com a estação — preços, crescimento,
-validade, estamina e mercado funcionam igual o ano inteiro.
+Cada estação muda crescimento, validade, plantio, fertilizante e mercado — ver
+[O que cada estação muda](#o-que-cada-estação-muda). Estamina e custos são iguais o ano inteiro.
 
 ## Transição visual
 

@@ -13,9 +13,8 @@ Este arquivo tem o que vale para a partida inteira. O resto está separado por a
 | [CONTROLS.md](CONTROLS.md) | teclas e o que o Espaço faz em cada célula |
 | [LOGS.md](LOGS.md) | os arquivos que cada partida grava |
 | [SEMENTE.md](SEMENTE.md) | a `SEED` que faz duas partidas terem o mesmo cenário |
-
-O objetivo é cultivar sem ficar sem energia. Andar, plantar e colher gastam estamina; só
-dormir em casa recupera. Chegar a zero encerra a partida.
+| [COMO_JOGAR.md](COMO_JOGAR.md) | guia do jogador, do começo ao fim |
+| [CONFIGURACOES.md](CONFIGURACOES.md) | como ajustar regras e parâmetros |
 
 ## Estamina
 

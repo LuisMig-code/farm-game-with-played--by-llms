@@ -266,6 +266,84 @@ def next_season_text(day: int, horizon: int) -> str:
 
 # ------------------------------------------------------------------ loja
 
+def _dump_example(crop: str, units: int) -> tuple[int, int]:
+    """(quanto rende, quanto renderia sem saturacao) despejar `units` num dia so.
+
+    Repete a conta de `Market.register_sale`: a unidade que dispara o gatilho
+    ainda sai pelo preco cheio, e a queda comeca na seguinte.
+    """
+    base, piso = CROPS[crop].sell_price, CROPS[crop].seed_price
+    total = queda = 0
+    for vendidas in range(1, units + 1):
+        total += max(piso, base - queda)
+        if vendidas >= game_settings.SUPPLY_DEMAND_DAILY_UNITS:
+            queda += game_settings.SUPPLY_DEMAND_DROP
+    return total, base * units
+
+
+def _streak_example(crop: str, per_day: int, days: int) -> list[list[int]]:
+    """O preco de cada unidade vendendo `per_day` por dia, `days` dias seguidos.
+
+    Mesma conta do dump, com o outro gatilho: a partir do segundo dia o "vendeu
+    ontem e hoje" ja derruba desde a primeira unidade do dia.
+    """
+    base, piso = CROPS[crop].sell_price, CROPS[crop].seed_price
+    queda, ontem, dias = 0, False, []
+    for _ in range(days):
+        precos = []
+        for vendidas in range(1, per_day + 1):
+            precos.append(max(piso, base - queda))
+            if ontem or vendidas >= game_settings.SUPPLY_DEMAND_DAILY_UNITS:
+                queda += game_settings.SUPPLY_DEMAND_DROP
+        dias.append(precos)
+        ontem = True
+    return dias
+
+
+def saturation_text() -> str:
+    """O mercado dinamico: como o preco de venda cai por insistencia e como volta.
+
+    Os dois exemplos sao calculados aqui, com a conta de `farm/market.py`; a
+    suite compara os numeros com um `Market` de verdade.
+    """
+    g = game_settings
+    despejo, unidades = "melancia", 20
+    total, cheio = _dump_example(despejo, unidades)
+    base, piso = CROPS[despejo].sell_price, CROPS[despejo].seed_price
+    seguido, por_dia, dias = "trigo", 3, 3
+    sequencia = " | ".join(" ".join(str(preco) for preco in dia)
+                           for dia in _streak_example(seguido, por_dia, dias))
+    return "\n".join([
+        f"Vale a partir do dia {g.SUPPLY_DEMAND_START_DAY}: antes disso nada é contado. A queda "
+        "é por cultivo — saturar",
+        "melancia não mexe no trigo.",
+        "",
+        "Dois gatilhos, qualquer um deles basta:",
+        f"  - Volume: vender {g.SUPPLY_DEMAND_DAILY_UNITS} ou mais unidades do mesmo cultivo no "
+        "MESMO dia.",
+        "  - Repetição: vender o mesmo cultivo ontem E hoje, em qualquer quantidade — 1 unidade",
+        "    em cada um dos dois dias já basta.",
+        "",
+        f"Disparado o gatilho, cada unidade seguinte vale {g.SUPPLY_DEMAND_DROP} moeda a menos, "
+        "até o piso: o preço",
+        "da semente daquele cultivo, onde vender empata com o custo e para de dar lucro. A conta",
+        "não é retroativa, e o desconto entra em cima do preço já multiplicado pela estação.",
+        "",
+        f"Cada dia SEM vender aquele cultivo devolve {g.SUPPLY_DEMAND_RECOVERY} moeda ao preço, "
+        "até o valor cheio; um",
+        "único dia parado também quebra a sequência da repetição.",
+        "",
+        "Com os preços base:",
+        f"  - despejar {unidades} {despejo}s num dia só rende {total} moedas, e não {cheio}: as "
+        f"{g.SUPPLY_DEMAND_DAILY_UNITS} primeiras",
+        f"    saem a {base}, depois {base - 1}, {base - 2}, {base - 3}... até o piso de {piso}.",
+        f"  - {por_dia} {seguido}s por dia, {dias} dias seguidos: {sequencia} — e no "
+        f"{dias + 1}º dia já",
+        "    começa no piso.",
+        "  - alternar cultivos, ou pular um dia, mantém o preço cheio.",
+    ])
+
+
 def shop_rules() -> str:
     g = game_settings
     precos = "  ".join(f"{k} {c.sell_price}" for k, c in CROPS.items())
@@ -277,18 +355,15 @@ def shop_rules() -> str:
         "- Estoque diário limitado por item, sorteado todo dia.",
         f"- Caixa: a loja tem {g.MARKET_DAILY_BUDGET} moedas por dia para pagar colheita (mais no "
         "inverno). Sem caixa, ela não compra. Comprar sementes devolve moedas ao caixa.",
-        f"- Saturação (a partir do dia {g.SUPPLY_DEMAND_START_DAY}): vender "
-        f"{g.SUPPLY_DEMAND_DAILY_UNITS}+ unidades do mesmo cultivo no mesmo dia, ou o mesmo cultivo "
-        f"em dois dias seguidos, derruba o preço em {g.SUPPLY_DEMAND_DROP} moeda por unidade, até o "
-        f"piso (preço da semente). Cada dia sem vender o cultivo recupera "
-        f"{g.SUPPLY_DEMAND_RECOVERY}.",
+        "- Saturação: insistir no mesmo cultivo derruba o preço de venda — a seção seguinte, "
+        "O MERCADO É DINÂMICO, tem a regra inteira.",
         f"- Inventário: no máximo {ITEM_LIMITS[seed_key(next(iter(CROPS)))]} sementes de cada tipo "
         f"e {ITEM_LIMITS[FERTILIZER]} fertilizantes. Vegetais e moedas sem limite.",
     ])
 
 
 def shop_today(game, last_sold: dict[str, int]) -> str:
-    loja, day = game.market, game.day
+    g, loja, day = game_settings, game.market, game.day
     vende = []
     for key in CROPS:
         preco, base = loja.sell_price(key, day), loja.base_price(key, day)
@@ -301,13 +376,17 @@ def shop_today(game, last_sold: dict[str, int]) -> str:
         compra.append(f"{key} {preco}{promo} [estoque {estoque}]")
     ontem = sorted(k for k, d in last_sold.items() if d == day - 1)
     saturacao = ("ativa" if loja.supply_demand_active(day)
-                 else f"desligada até o dia {game_settings.SUPPLY_DEMAND_START_DAY}")
+                 else f"desligada até o dia {g.SUPPLY_DEMAND_START_DAY}")
     return "\n".join([
         f"  caixa da loja hoje: {loja.budget_left(day)} moedas",
         "  vende (1 un):  " + " | ".join(vende),
         "  compra:        " + " | ".join(compra[:3]),
         "                 " + " | ".join(compra[3:]),
         f"  saturação: {saturacao} | vendido ontem: {', '.join(ontem) or 'nada'}",
+        f"    ({g.SUPPLY_DEMAND_DAILY_UNITS}+ do mesmo cultivo hoje, ou o mesmo cultivo ontem e hoje, "
+        f"derrubam {g.SUPPLY_DEMAND_DROP} moeda por",
+        f"     unidade até o piso, que é o preço da semente; cada dia sem vender devolve "
+        f"{g.SUPPLY_DEMAND_RECOVERY})",
     ])
 
 
@@ -391,6 +470,7 @@ def strategy_values(game, horizon: int, knowledge: str | None) -> dict:
         "FERTILIZANTE": fertilizer_text(),
         "ESTACOES": seasons_block(horizon),
         "REGRAS_LOJA": shop_rules(),
+        "SATURACAO": saturation_text(),
         "BASE_DE_CONHECIMENTO": base,
         "ESTRATEGIA_MAX": settings.STRATEGY_MAX_CHARS,
     }

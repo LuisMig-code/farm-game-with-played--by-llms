@@ -76,12 +76,16 @@ Um comando por elemento do array. Vocabulário fechado — qualquer token fora
 destas listas é erro.
 
   IR <cama|loja|canteiro_esquerdo|canteiro_direito>
-  COLHER [LIMITE <n>]
-  PLANTAR <cenoura|batata|beterraba|trigo|melancia> <TUDO|<n>|LIMITE <n>>
-  FERTILIZAR [LIMITE <n>]
-  LIMPAR [LIMITE <n>]
+  COLHER [TUDO|<n>|LIMITE <n>]
+  PLANTAR <cenoura|batata|beterraba|trigo|melancia> [TUDO|<n>|LIMITE <n>]
+  FERTILIZAR [TUDO|<n>|LIMITE <n>]
+  LIMPAR [TUDO|<n>|LIMITE <n>]
   COMPRAR <cenoura|batata|beterraba|trigo|melancia|fertilizante> <n>
-  VENDER <cenoura|batata|beterraba|trigo|melancia> <TUDO|<n>>
+  VENDER <cenoura|batata|beterraba|trigo|melancia> [TUDO|<n>|LIMITE <n>]
+
+A quantidade tem uma regra só, em todos eles: a palavra LIMITE é opcional
+(`COLHER 3` é o mesmo que `COLHER LIMITE 3`) e TUDO — ou nada — quer dizer "o
+que der". Só COMPRAR exige o número.
 
 Regras de execução:
 
@@ -91,9 +95,11 @@ Regras de execução:
   sempre a mais próxima primeiro.
 - COMPRAR <cultivo> compra SEMENTES daquele cultivo. COMPRAR e VENDER só
   funcionam em `loja`. Vender ANTES de comprar, ou não haverá moedas.
-- COLHER sem LIMITE colhe tudo que estiver pronto no canteiro.
+- COLHER sem quantidade, ou COLHER TUDO, colhe tudo que estiver pronto no
+  canteiro; com um número, colhe até esse número.
 - PLANTAR ... TUDO planta enquanto houver semente e célula livre.
-  PLANTAR <cultivo> <n> planta até n (o mesmo que LIMITE <n>).
+  PLANTAR <cultivo> <n> planta até n, parando antes se acabar semente, célula
+  livre ou stamina.
 - FERTILIZAR age sobre plantas ainda crescendo e não fertilizadas (ver
   FERTILIZANTE acima).
 - LIMPAR arranca plantas podres (não rende nada, libera a célula).

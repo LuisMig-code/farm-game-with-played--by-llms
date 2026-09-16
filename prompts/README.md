@@ -5,7 +5,7 @@ arquivo muda a próxima partida, sem tocar em Python.
 
 | Arquivo | Quando é usado | O modelo devolve |
 | --- | --- | --- |
-| `prompt_inicial.md` | uma vez, antes do dia 1 | `analise`, `regras_de_bolso`, `estrategia` |
+| `prompt_inicial.md` | uma vez, antes do dia 1 | `analise` (prazo, cultivos, canteiros, abertura, uso das moedas, fechamento), `regras_de_bolso`, `estrategia` em bullets |
 | `prompt_gaming.md` | todo dia | `leitura_do_dia`, `conhecimento`, `plano` |
 
 ## Formato
@@ -33,7 +33,8 @@ existem e rejeita a resposta se faltarem.
 | `{TABELA_CULTIVOS}` | prazo, validade, preços e lucro de cada cultivo |
 | `{FERTILIZANTE}` | como o fertilizante funciona e suas restrições |
 | `{ESTACOES}` | as estações que a partida atravessa, com os dias de cada uma |
-| `{REGRAS_LOJA}` | preços base, promoção, estoque, caixa, saturação, limites |
+| `{REGRAS_LOJA}` | preços base, promoção, estoque, caixa, limites |
+| `{SATURACAO}` | o mercado dinâmico: gatilhos, piso, recuperação e dois exemplos |
 | `{BASE_DE_CONHECIMENTO}` | o `--knowledge`, ou vazio |
 | `{ESTRATEGIA_MAX}` | tamanho máximo da estratégia |
 
@@ -47,7 +48,7 @@ existem e rejeita a resposta se faltarem.
 | `{STAMINA}`, `{MOEDAS}` | estamina e moedas |
 | `{COLHEITA}`, `{SEMENTES}`, `{FERTILIZANTES}` | o inventário |
 | `{LIVRES_ESQ}`, `{PLANTIOS_ESQ}`, `{LIVRES_DIR}`, `{PLANTIOS_DIR}` | células livres e plantações de cada horta |
-| `{LOJA}` | caixa, preços, promoções, estoque e saturação de hoje |
+| `{LOJA}` | caixa, preços, promoções, estoque e saturação de hoje, com a regra curta da saturação |
 | `{CUSTOS}` | distâncias e custo de cada ação |
 | `{PRAZO_POR_CULTIVO}`, `{CULTIVOS_INVIAVEIS}` | até que dia ainda dá para plantar cada cultivo |
 | `{TABELA_CULTIVOS}` | a tabela de cultivos com os preços de hoje |

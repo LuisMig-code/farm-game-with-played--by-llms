@@ -15,22 +15,30 @@ código.
 
 ```
 <comando> ::= IR <zona>
-            | COLHER [LIMITE <n>]
-            | PLANTAR <cultivo> (TUDO | <n> | LIMITE <n>)
-            | FERTILIZAR [LIMITE <n>]
-            | LIMPAR [LIMITE <n>]
-            | COMPRAR (<cultivo> | fertilizante) <n>
-            | VENDER <cultivo> (TUDO | <n>)
+            | COLHER [<quantidade>]
+            | PLANTAR <cultivo> [<quantidade>]
+            | FERTILIZAR [<quantidade>]
+            | LIMPAR [<quantidade>]
+            | COMPRAR (<cultivo> | fertilizante) (<n> | LIMITE <n>)
+            | VENDER <cultivo> [<quantidade>]
+
+<quantidade> ::= TUDO | <n> | LIMITE <n>
 ```
 
 Um comando por elemento do array `plano`. Sem prosa, sem numeração, sem coordenada.
+
+**Uma regra só para a quantidade**, em todos os verbos: a palavra `LIMITE` é **opcional**
+(`COLHER 3` é o mesmo que `COLHER LIMITE 3`) e `TUDO` — ou nenhuma quantidade — quer dizer "o que
+der". A única exceção é `COMPRAR`, que **exige** o número: um comando não zera o caixa da run sem
+dizer quanto. Cada grafia produz exatamente o mesmo comando, então `COLHER 3` e `COLHER LIMITE 3`
+também têm o mesmo código de retorno.
 
 | Categoria | Valores válidos |
 | --- | --- |
 | Verbos | `IR` `COLHER` `PLANTAR` `FERTILIZAR` `LIMPAR` `COMPRAR` `VENDER` |
 | Zonas | `cama` `loja` `canteiro_esquerdo` `canteiro_direito` |
 | Cultivos | `cenoura` `batata` `beterraba` `trigo` `melancia` |
-| Quantificadores | `TUDO` · `LIMITE <n>` · `<n>` (em `PLANTAR`, igual a `LIMITE <n>`; em `COMPRAR` e `VENDER`, a quantidade) |
+| Quantificadores | `TUDO` · `<n>` · `LIMITE <n>` (a palavra `LIMITE` é opcional; ausente = `TUDO`, menos em `COMPRAR`) |
 
 Maiúsculas e minúsculas são aceitas. Qualquer outro token é `ERRO_GRAMATICA`.
 
@@ -55,12 +63,14 @@ Maiúsculas e minúsculas são aceitas. Qualquer outro token é `ERRO_GRAMATICA`
 - **Todo comando tolera execução parcial**: faz o que der e segue.
 - **`COMPRAR <cultivo> n` compra sementes** daquele cultivo. `COMPRAR fertilizante n` compra
   fertilizante. Comprar e vender custam 0 de stamina e exigem estar na `loja`.
-- **`COLHER`** sem `LIMITE` colhe todas as plantas prontas (e não podres) do canteiro. A célula fica
-  livre na hora: plantar logo depois, na mesma viagem, é o uso esperado.
+- **`COLHER`**, sem quantidade ou com `TUDO`, colhe todas as plantas prontas (e não podres) do
+  canteiro. A célula fica livre na hora: plantar logo depois, na mesma viagem, é o uso esperado.
 - **`PLANTAR <cultivo> TUDO`** planta enquanto houver semente e célula livre.
-- **`PLANTAR <cultivo> <n>`** é o mesmo que `PLANTAR <cultivo> LIMITE <n>`: planta **até** `n`,
-  parando antes se acabar a semente, a célula livre ou a stamina. Era o erro de gramática mais comum
-  dos modelos — `VENDER` e `COMPRAR` já aceitavam o número direto — e passou a valer.
+- **Um número é um teto**, não uma cota: `PLANTAR trigo 5` (ou `LIMITE 5`) planta **até** 5,
+  parando antes se acabar a semente, a célula livre ou a stamina. Em `COMPRAR` e `VENDER` o número
+  é a quantidade pedida, e comprar ou vender menos vira `PARCIAL` no feedback.
+- **`COLHER TUDO`, `LIMPAR TUDO` e `PLANTAR <cultivo> <n>`** foram, nessa ordem, os erros de
+  gramática mais comuns das runs: a linguagem passou a aceitar as três formas em vez de recusá-las.
 - **`FERTILIZAR`** age em plantas ainda crescendo e não fertilizadas, até o limite de 3 por dia.
 - **`LIMPAR`** arranca plantas podres: não rende nada, só libera a célula.
 - Dentro do canteiro, **o alvo é sempre a célula mais próxima** (empate: menor coluna, depois menor

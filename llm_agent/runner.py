@@ -144,12 +144,13 @@ class LLMRun:
                          responses.STRATEGY_KEYS, responses.strategy_problem)
         cortada = False
         dados = out.parsed
-        if dados is None and out.candidate and isinstance(out.candidate.get("estrategia"), str):
+        if dados is None and out.candidate and responses.strategy_text(
+                out.candidate.get("estrategia")):
             # Esgotou as tentativas so por tamanho: usa a ultima, cortada no teto.
             dados, cortada = out.candidate, True
         if dados is not None:
-            texto = " ".join(str(dados.get("estrategia") or "").split())
-            self.strategy = texto[:settings.STRATEGY_MAX_CHARS]
+            texto = responses.strategy_text(dados.get("estrategia"))
+            self.strategy = responses.fit(texto, settings.STRATEGY_MAX_CHARS)
             cortada = cortada or len(texto) > settings.STRATEGY_MAX_CHARS
 
         logger.info("estrategia: %s%s | %r", out.status, " (cortada)" if cortada else "",
@@ -510,7 +511,6 @@ def _readme(r: dict, run: "LLMRun") -> str:
 | Velocidade das acoes | {run.speed:g}x |
 | Dias jogados | {r['dias_jogados']} de {r['horizonte']} |
 | **Moedas no fim** | **{r['moedas_fim']}** |
-| Estrategia | `{run.strategy or '(nenhuma)'}` |
 | Dias perdidos (sem plano) | {r['dias_perdidos']} (timeout: {r['dias_timeout']}) |
 | Dias truncados pela stamina | {r['dias_truncados']} |
 | Plantas no chao no fim | {r['no_chao_no_fim']} |
@@ -523,6 +523,10 @@ def _readme(r: dict, run: "LLMRun") -> str:
 | Custo | US$ {r['custo_usd']} |
 | Inicio / fim | {r['inicio']} / {r['fim']} |
 | Situacao | {r['interrompida'] or 'completa'} |
+
+## Estrategia
+
+{run.strategy or '(nenhuma)'}
 
 ## Arquivos
 

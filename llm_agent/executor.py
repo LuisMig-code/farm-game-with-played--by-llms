@@ -238,7 +238,7 @@ class Executor:
             r.code, r.requested, r.effective, r.detail = RESOURCE, c.limit, 0, falta
             return
 
-        # PLANTAR TUDO e COLHER/LIMPAR/FERTILIZAR sem LIMITE pedem o que da.
+        # Sem quantidade (ou com TUDO), o comando pede o que der.
         pedido = c.cap(len(alvos) if c.verb == "FERTILIZAR" else cabe)
         r.requested = pedido
         feitos, restantes, corte = 0, set(alvos), None

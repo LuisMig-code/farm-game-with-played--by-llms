@@ -71,6 +71,13 @@ foi PLANTADA, mesmo que a estação vire depois.
 
 {REGRAS_LOJA}
 
+## O MERCADO É DINÂMICO
+
+O preço de venda não é fixo: ele CAI quando você insiste em vender o mesmo
+cultivo, e volta sozinho quando você para.
+
+{SATURACAO}
+
 {BASE_DE_CONHECIMENTO}
 
 ## FORMATO DA RESPOSTA
@@ -83,15 +90,21 @@ Responda com este JSON e nada mais:
     "cultivos": "qual cultivo ou mix, com a justificativa numérica",
     "canteiros": "um ou os dois, e por quê",
     "abertura": "como sair de {MOEDAS_INICIAIS} moedas nos primeiros dias",
+    "uso_de_moedas": "quanto do caixa reinvestir e quanto segurar, quando vender e quando esperar o preço voltar, o que fazer com as moedas perto do fim",
     "fechamento": "a partir de que dia parar de plantar cada cultivo"
   },
   "regras_de_bolso": [
     "de 3 a 6 regras curtas e acionáveis que você seguirá todo dia"
   ],
-  "estrategia": "resumo da estratégia geral, MÁXIMO {ESTRATEGIA_MAX} CARACTERES"
+  "estrategia": [
+    "de 3 a 5 bullets curtos e imperativos, um por item da lista",
+    "um deles PRECISA ser sobre as moedas: quanto reinvestir, quanto segurar, quando vender",
+    "MÁXIMO {ESTRATEGIA_MAX} CARACTERES somando todos os bullets"
+  ]
 }
 
 O campo "estrategia" é o único que será reinjetado em TODAS as chamadas
-diárias — é a sua âncora para a partida inteira. Escreva-o denso e imperativo,
-sem preâmbulo. Conte os caracteres: acima de {ESTRATEGIA_MAX} a resposta é
-rejeitada.
+diárias — é a sua âncora para a partida inteira. Escreva de 3 a 5 bullets
+densos e imperativos, sem preâmbulo, e um deles sobre o uso das moedas. Conte
+os caracteres do bloco inteiro, com os "- " e as quebras de linha: acima de
+{ESTRATEGIA_MAX} a resposta é rejeitada e pedida de novo.

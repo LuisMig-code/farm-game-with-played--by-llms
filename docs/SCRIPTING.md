@@ -150,6 +150,14 @@ venv/Scripts/python.exe -m pip install -r requirements-agent.txt
 Sem ela, `Session(record=...)` levanta `RecorderUnavailable` com o comando; sem `record`, a sessão
 roda normalmente.
 
+O MP4 é **fragmentado**: o índice vai no começo do arquivo e cada fragmento de 1 s vai para o disco
+assim que fecha. Com um MP4 comum o índice só é escrito no `close()`, e um processo morto a força
+(Gerenciador de Tarefas, `taskkill /F`, terminal fechado) deixava um arquivo que nenhum player
+abria. Agora o vídeo abre até ~3 s antes da parada — o que ainda estava dentro do encoder. Os
+fragmentos são cortados por tempo, e não em quadro-chave, para manter o intervalo de quadros-chave
+padrão: cortar num quadro-chave por segundo deixava o vídeo de uma partida ~5x maior; por tempo, ele
+fica 0,1% maior.
+
 ## Ritmo e a janela
 
 A sessão roda em **tempo real, com a janela aberta**, a 60 fps. Duas consequências:

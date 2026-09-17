@@ -6,6 +6,13 @@ quadro gravado, folgado dentro dos 16,6 ms de orcamento de um quadro a 60 fps.
 
 O encoder e o ffmpeg estatico do `imageio-ffmpeg`, alimentado com bytes RGB
 crus. Nao passa por numpy nem por PIL, que nao existem no venv do projeto.
+
+O MP4 e fragmentado: o indice vai no comeco do arquivo e cada fragmento vai
+para o disco assim que fecha. Um MP4 comum so escreve o indice ao fechar, entao
+um processo morto a forca (gerenciador de tarefas, terminal fechado,
+`taskkill /F`) deixava um arquivo que nenhum player abre. Assim, o video de uma
+run parada no meio abre ate o fim do ultimo fragmento: perdem-se so os ~3 s
+finais, que ainda estavam no encoder.
 """
 
 import logging
@@ -19,6 +26,14 @@ logger = logging.getLogger(__name__)
 
 SIZE = (1000, 500)
 FPS = 30
+# Fragmentos cortados por tempo, e nao em quadro-chave: o intervalo de
+# quadros-chave fica o padrao do encoder. Cortar em quadro-chave obrigaria um a
+# cada segundo, e o video de uma partida (tela quase parada) ficava ~5x maior;
+# assim fica 0,1% maior. Sem `-flush_packets` o ffmpeg segura os fragmentos no
+# buffer e o arquivo nao passa do cabecalho enquanto grava.
+FRAGMENT_SECONDS = 1
+FRAGMENTED = ["-frag_duration", str(FRAGMENT_SECONDS * 1_000_000),
+              "-movflags", "+empty_moov+default_base_moof", "-flush_packets", "1"]
 INSTALL = "venv/Scripts/python.exe -m pip install imageio-ffmpeg"
 
 
@@ -47,6 +62,7 @@ class Recorder:
             # O padrao arredonda a resolucao para multiplos de 16; queremos o
             # tamanho pedido exatamente como esta.
             macro_block_size=1,
+            output_params=list(FRAGMENTED),      # o imageio-ffmpeg pode estender a lista
         )
         writer.send(None)                # inicializa o gerador
         logger.info("gravando %s (%dx%d a %d fps)", self.path.name, *self.size, self.fps)

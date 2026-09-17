@@ -168,6 +168,19 @@ chunked chegava; a espera hoje usa `Event` + `sleep` e ainda confere o prazo na 
 A run pede ao Windows para não suspender por inatividade enquanto existir (`--allow-sleep`
 desliga). Para runs longas, `--headless` evita a janela, que o Windows poderia fechar como travada.
 
+## Parar uma run no meio
+
+| Como parou | Vídeo | `LEIAME.md`, `resumo.csv` e cópia em `logs/` |
+| --- | --- | --- |
+| **Ctrl+C** no terminal, ou fechar a janela do jogo | completo até a parada | escritos, com a situação `interrompida` |
+| **À força**: Gerenciador de Tarefas, `taskkill /F`, fechar o terminal | abre até ~3 s antes da parada | não são escritos |
+
+O vídeo sobrevive à parada à força porque o `video.mp4` é um MP4 fragmentado: o índice fica no
+começo e cada fragmento de 1 s vai para o disco assim que fecha. Um MP4 comum só escreve o índice no
+fechamento, e a run morta deixava um arquivo que nenhum player abria. Os segundos finais que se
+perdem ainda estavam dentro do encoder. Os CSVs são gravados linha a linha, então também ficam
+completos até o último dia terminado.
+
 ## Pastas
 
 ```

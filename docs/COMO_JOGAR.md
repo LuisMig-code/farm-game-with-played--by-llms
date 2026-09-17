@@ -255,6 +255,7 @@ Para escrever o seu próprio script, veja [SCRIPTING.md](SCRIPTING.md).
 | `--seed N` | a do jogo | semente do cenário |
 | `--days N` | 121 | quantos dias jogar |
 | `--model ID` | `openai/gpt-5.6-luna` | qualquer modelo do OpenRouter |
+| `--reasoning-effort NIVEL` | o do provedor | `low`, `medium` ou `high`: quanto o modelo raciocina antes de responder |
 | `--mode` | `principal` | `sem_memoria`: o bloco de conhecimento chega sempre vazio |
 | `--knowledge ARQ` | — | `.txt` de aprendizados anteriores, anexado à chamada de estratégia |
 | `--timeout S` | 360 | segundos de espera por chamada; estourou, o jogador dorme |

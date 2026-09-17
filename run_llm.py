@@ -22,6 +22,10 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--days", type=int, default=settings.DAYS,
                    help=f"quantos dias jogar (padrao {settings.DAYS})")
     p.add_argument("--model", default=settings.MODEL, help=f"id no OpenRouter (padrao {settings.MODEL})")
+    p.add_argument("--reasoning-effort", choices=settings.REASONING_EFFORTS,
+                   default=settings.REASONING_EFFORT,
+                   help="quanto o modelo raciocina antes de responder, nos modelos que aceitam "
+                        "(padrao: nao envia, vale o do provedor)")
     p.add_argument("--mode", choices=settings.MODES, default=settings.MODE,
                    help="principal, ou sem_memoria (o conhecimento chega sempre vazio)")
     p.add_argument("--knowledge", type=Path, default=None,
@@ -80,12 +84,15 @@ def main(argv=None) -> int:
 
     from llm_agent.runner import LLMRun       # importa pygame so depois dos argumentos
     resumo = LLMRun(seed=args.seed, days=args.days, model=args.model, mode=args.mode,
+                    reasoning_effort=args.reasoning_effort,
                     knowledge_path=args.knowledge, video=not args.no_video,
                     realtime=args.realtime, speed=args.speed, api_timeout=args.timeout,
                     max_attempts=args.attempts, runs_dir=args.runs_dir).run()
 
     print()
     print(f"run: {args.runs_dir / resumo['pasta']}")
+    if resumo["interrompida"]:
+        print(f"PAROU: {resumo['interrompida']}")
     print(f"moedas no fim: {resumo['moedas_fim']} | dias jogados: {resumo['dias_jogados']} | "
           f"dias perdidos: {resumo['dias_perdidos']} | dias truncados: {resumo['dias_truncados']} | "
           f"custo US$ {resumo['custo_usd']}")

@@ -28,7 +28,8 @@ from llm_agent import facts, feedback, responses, settings, templates
 from llm_agent.executor import (CONTEXT, GRAMMAR, OK, PARTIAL, RESOURCE, TRUNCATED, DayExecution,
                                 Executor)
 from llm_agent.openrouter import OK as HTTP_OK
-from llm_agent.openrouter import TIMEOUT, OpenRouterClient, load_api_key
+from llm_agent.openrouter import (AUTH_ERROR, NO_CREDITS, TIMEOUT, OpenRouterClient,
+                                  load_api_key)
 from llm_agent.parsing import ParseError, extract_json
 from llm_agent.run_logs import RunFolder, call_timing, publish_game_logs, slug
 from llm_agent.transactions import Transaction, TransactionLog
@@ -37,6 +38,15 @@ from scripting import Aborted, Session
 logger = logging.getLogger(__name__)
 
 LLM_OK, LLM_TIMEOUT, LLM_API_ERROR, LLM_BAD_JSON = "ok", "timeout", "erro_api", "json_invalido"
+MOTIVO_FATAL = {NO_CREDITS: "sem creditos", AUTH_ERROR: "chave recusada"}
+
+
+class ApiUnusable(RuntimeError):
+    """Sem creditos ou chave recusada: nenhuma tentativa resolve, a run para."""
+
+
+class NoStrategy(RuntimeError):
+    """A chamada inicial nao devolveu estrategia: a run nem comeca a jogar."""
 
 
 @dataclass
@@ -50,6 +60,7 @@ class Outcome:
 class LLMRun:
     def __init__(self, *, seed: int | None = None, days: int = settings.DAYS,
                  model: str = settings.MODEL, mode: str = settings.MODE,
+                 reasoning_effort: str | None = settings.REASONING_EFFORT,
                  knowledge_path: Path | None = None, video: bool = settings.VIDEO,
                  realtime: bool = settings.REALTIME, speed: float = settings.GAME_SPEED,
                  api_timeout: float = settings.API_TIMEOUT_SECONDS,
@@ -61,6 +72,9 @@ class LLMRun:
                  prompt_day: Path = settings.PROMPT_DAY):
         if mode not in settings.MODES:
             raise ValueError(f"modo invalido '{mode}' (validos: {', '.join(settings.MODES)})")
+        if reasoning_effort not in (None, *settings.REASONING_EFFORTS):
+            raise ValueError(f"reasoning effort invalido '{reasoning_effort}' "
+                             f"(validos: {', '.join(settings.REASONING_EFFORTS)})")
         if days < 1:
             raise ValueError("a run precisa de pelo menos 1 dia")
         if not 0 < speed <= Session.max_speed():
@@ -68,6 +82,7 @@ class LLMRun:
 
         self.seed = farm_rng.resolve_seed(seed)
         self.days, self.model, self.mode = days, model, mode
+        self.reasoning_effort = reasoning_effort
         self.video, self.realtime, self.speed = video, realtime, speed
         self.api_timeout, self.max_attempts, self.retry_wait = api_timeout, max_attempts, retry_wait
         self.runs_dir = Path(runs_dir)
@@ -78,7 +93,8 @@ class LLMRun:
         self.knowledge_base = (self.knowledge_path.read_text(encoding="utf-8")
                                if self.knowledge_path else None)
         self.client = client or OpenRouterClient(
-            model=model, api_key=load_api_key(), timeout=api_timeout, seed=self.seed)
+            model=model, api_key=load_api_key(), timeout=api_timeout, seed=self.seed,
+            reasoning_effort=reasoning_effort)
 
         self.session: Session | None = None
         self.transactions: TransactionLog | None = None
@@ -100,7 +116,8 @@ class LLMRun:
         for caminho in (self.prompt_strategy, self.prompt_day):
             templates.load(caminho)
 
-        self.folder = RunFolder(self.runs_dir, model=self.model, mode=self.mode, seed=self.seed)
+        self.folder = RunFolder(self.runs_dir, model=self.model, mode=self.mode, seed=self.seed,
+                                reasoning_effort=self.reasoning_effort)
         # Atribuicao em runtime, antes de criar o Game: os logs nativos do jogo
         # vao para dentro da pasta da run. O arquivo de settings nao muda.
         game_settings.LOGS_DIR = self.folder.game_logs
@@ -125,6 +142,9 @@ class LLMRun:
                     interrompida = "game over (nao deveria acontecer com a rede de seguranca)"
                     logger.error(interrompida)
                     break
+        except (ApiUnusable, NoStrategy) as erro:
+            interrompida = str(erro)
+            logger.error("run parada: %s", interrompida)
         except (KeyboardInterrupt, Aborted) as erro:
             interrompida = f"interrompida: {erro or type(erro).__name__}"
             logger.warning("run %s", interrompida)
@@ -141,7 +161,8 @@ class LLMRun:
         self.folder.prompt_text("estrategia/prompt.txt", prompt)
 
         out = self._call(prompt.messages(), 0, "estrategia", "estrategia/resposta",
-                         responses.STRATEGY_KEYS, responses.strategy_problem)
+                         responses.STRATEGY_KEYS, responses.strategy_problem,
+                         max_attempts=settings.STRATEGY_MAX_ATTEMPTS, retry_all=True)
         cortada = False
         dados = out.parsed
         if dados is None and out.candidate and responses.strategy_text(
@@ -166,6 +187,10 @@ class LLMRun:
             "problema_na_ultima_resposta": out.problem,
             "base_de_conhecimento": str(self.knowledge_path) if self.knowledge_path else None,
         })
+        if not self.strategy:
+            # Jogar 121 dias sem ancora nao serve para nada: melhor parar aqui.
+            raise NoStrategy(f"sem estrategia: {settings.STRATEGY_MAX_ATTEMPTS} tentativas e a "
+                             f"chamada inicial nao devolveu uma ({out.problem or out.status})")
 
     # -------------------------------------------------------------------- dia
 
@@ -303,10 +328,17 @@ class LLMRun:
 
     # --------------------------------------------------------------- chamadas
 
-    def _call(self, mensagens, dia, tipo, prefixo, chaves, problema) -> Outcome:
-        """Chama o modelo com as tentativas e confere a resposta."""
+    def _call(self, mensagens, dia, tipo, prefixo, chaves, problema, *,
+              max_attempts: int | None = None, retry_all: bool = False) -> Outcome:
+        """Chama o modelo com as tentativas e confere a resposta.
+
+        `retry_all` repete tambem o que normalmente nao repete -- timeout e erro
+        HTTP de uma vez so --, para a chamada inicial nao deixar a run sem
+        estrategia. Erro fatal (sem creditos, chave recusada) para a run sempre.
+        """
+        tentativas = max_attempts or self.max_attempts
         ultimo = Outcome(LLM_API_ERROR)
-        for tentativa in range(1, self.max_attempts + 1):
+        for tentativa in range(1, tentativas + 1):
             logger.info("dia %d: chamada %s (tentativa %d)", dia, tipo, tentativa)
             comeco, t0 = datetime.now(), time.monotonic()
             # Se a espera passar do prazo, a pilha de todas as threads vai para o
@@ -327,11 +359,18 @@ class LLMRun:
             self.folder.response_text(f"{prefixo}_{tentativa}.txt", r)
             self._count_call(r)
 
+            if r.fatal:
+                motivo = " ".join((r.error or "").split())[:200]
+                logger.error("dia %d: %s (HTTP %s) %s", dia, r.status, r.http_status, motivo)
+                raise ApiUnusable(f"{MOTIVO_FATAL[r.status]} (HTTP {r.http_status}): {motivo}")
             if r.status == TIMEOUT:
+                if retry_all and tentativa < tentativas:
+                    self._wait(self.retry_wait)
+                    continue
                 return Outcome(LLM_TIMEOUT, candidate=ultimo.candidate)
             if r.status != HTTP_OK:
                 logger.warning("dia %d: %s (%s) %s", dia, r.status, r.http_status, r.error[:200])
-                if r.retryable and tentativa < self.max_attempts:
+                if (r.retryable or retry_all) and tentativa < tentativas:
                     self._wait(self.retry_wait)
                     continue
                 return Outcome(LLM_API_ERROR, candidate=ultimo.candidate)
@@ -346,7 +385,7 @@ class LLMRun:
 
             ultimo = Outcome(LLM_BAD_JSON, candidate=dados or ultimo.candidate, problem=motivo)
             logger.warning("dia %d: resposta reprovada (%s)", dia, motivo)
-            if tentativa < self.max_attempts:
+            if tentativa < tentativas:
                 mensagens = mensagens + [
                     {"role": "assistant", "content": r.content or "(vazio)"},
                     {"role": "user", "content": f"Resposta rejeitada: {motivo}. Responda "
@@ -398,7 +437,7 @@ class LLMRun:
             "logs_do_jogo_copiados_para": str(self.game_logs_dir),
             "janela": os.environ.get("SDL_VIDEODRIVER") != "dummy",
             "api_timeout_segundos": self.api_timeout, "tentativas_por_chamada": self.max_attempts,
-            "temperatura": settings.TEMPERATURE, "reasoning_effort": settings.REASONING_EFFORT,
+            "temperatura": settings.TEMPERATURE, "reasoning_effort": self.reasoning_effort,
             "json_forcado": settings.RESPONSE_FORMAT_JSON, "max_tokens": settings.MAX_TOKENS,
             "estrategia_max_caracteres": settings.STRATEGY_MAX_CHARS,
             "conhecimento_max_linhas": settings.KNOWLEDGE_MAX_LINES,
@@ -506,6 +545,7 @@ def _readme(r: dict, run: "LLMRun") -> str:
 | | |
 | --- | --- |
 | Modelo | `{r['modelo']}` |
+| Reasoning effort | {run.reasoning_effort or 'padrao do provedor'} |
 | Modo | {r['modo']} |
 | Semente | {r['seed']} |
 | Velocidade das acoes | {run.speed:g}x |

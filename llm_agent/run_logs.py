@@ -2,7 +2,7 @@
 
     runs_llm/
       resumo.csv
-      <AAAA-MM-DD_HH-MM-SS>_<modelo>_<modo>_seed<N>/
+      <AAAA-MM-DD_HH-MM-SS>_<modelo>[_reasoning-<nivel>]_<modo>_seed<N>/
         LEIAME.md  config.json  agente.log
         chamadas.csv  comandos.csv  dias.csv  erros_gramatica.csv
         precos.csv  transacoes.csv
@@ -12,7 +12,8 @@
       IA_<modelo>_run_<id>_semente<N>_<data>.log / .csv   copia do que esta em jogo/
       IA_<modelo>_celulas_estragadas.csv                 acumulado por modelo
 
-O nome da pasta ordena cronologicamente e diz modelo, modo e semente. Todo CSV e
+O nome da pasta ordena cronologicamente e diz modelo, modo e semente -- e o
+reasoning effort, quando a run define um. Todo CSV e
 gravado com flush por linha: uma run interrompida no meio continua legivel.
 """
 
@@ -124,9 +125,11 @@ class _Csv:
 
 class RunFolder:
     def __init__(self, runs_dir: Path, *, model: str, mode: str, seed: int,
-                 started: datetime | None = None):
+                 reasoning_effort: str | None = None, started: datetime | None = None):
         self.started = started or datetime.now()
-        self.name = f"{self.started:%Y-%m-%d_%H-%M-%S}_{slug(model)}_{mode}_seed{seed}"
+        # O mesmo modelo com esforcos diferentes nao pode dar pastas de nome igual.
+        modelo = slug(model) + (f"_reasoning-{reasoning_effort}" if reasoning_effort else "")
+        self.name = f"{self.started:%Y-%m-%d_%H-%M-%S}_{modelo}_{mode}_seed{seed}"
         self.root = runs_dir / self.name
         sufixo = 2                                 # duas runs no mesmo segundo
         while self.root.exists():

@@ -22,7 +22,8 @@ MODEL = "openai/gpt-5.6-luna"
 # None = nao envia. O gpt-5.6-luna nao lista `temperature` nos parametros aceitos.
 TEMPERATURE: float | None = None
 # None = deixa o provedor decidir. Aceita "low", "medium" ou "high" nos modelos
-# que listam `reasoning_effort`.
+# que listam `reasoning_effort` (flag --reasoning-effort).
+REASONING_EFFORTS = ("low", "medium", "high")
 REASONING_EFFORT: str | None = None
 # Pede JSON de verdade ao provedor (`response_format`). Modelos que nao aceitam o
 # parametro caem no parser, que extrai o objeto do texto de qualquer jeito.
@@ -38,6 +39,9 @@ API_TIMEOUT_SECONDS = 360     # 6 min
 # Tentativas quando a resposta CHEGOU mas nao serve (JSON invalido, 429, 5xx).
 API_MAX_ATTEMPTS = 3
 API_RETRY_WAIT_SECONDS = 5
+# So a chamada inicial: ela repete ate isto, inclusive em timeout, porque uma run
+# sem estrategia joga os dias todos sem ancora. Esgotado, a run nao comeca.
+STRATEGY_MAX_ATTEMPTS = 10
 
 # ------------------------------------------------------------------ run
 DAYS = 121                     # ano completo + 1 dia de primavera

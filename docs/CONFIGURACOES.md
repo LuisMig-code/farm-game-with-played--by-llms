@@ -48,6 +48,7 @@ arquivos `settings.py` são só valores, sem lógica: edite, salve e rode de nov
 | `--seed N` | a do jogo | semente do cenário |
 | `--days N` | `DAYS` = 121 | quantos dias jogar |
 | `--model ID` | `MODEL` = `openai/gpt-5.6-luna` | id do modelo no OpenRouter |
+| `--reasoning-effort NIVEL` | `REASONING_EFFORT` = None | `low`, `medium` ou `high`; sem a flag, vale o do provedor |
 | `--mode` | `MODE` = `principal` | `principal` ou `sem_memoria` |
 | `--knowledge ARQ` | — | `.txt` de base de conhecimento, só na chamada de estratégia |
 | `--timeout S` | `API_TIMEOUT_SECONDS` = 360 | espera máxima por chamada |
@@ -245,6 +246,7 @@ Tudo que tem flag no `run_llm.py` pode ser sobreposto na linha de comando.
 | `INCLUDE_REASONING` | `True` | grava o raciocínio do modelo junto da resposta |
 | `API_TIMEOUT_SECONDS` | 360 | espera por chamada (`--timeout`); estourou, o jogador dorme e não há nova tentativa |
 | `API_MAX_ATTEMPTS` | 3 | tentativas para JSON inválido, 429 e 5xx (`--attempts`) |
+| `STRATEGY_MAX_ATTEMPTS` | 10 | tentativas só da chamada inicial, inclusive em timeout; esgotadas sem estratégia, a run não começa |
 | `API_RETRY_WAIT_SECONDS` | 5 | espera entre tentativas |
 | `API_KEY_ENV` | `"OPEN_ROUTER_API_KEY"` | nome da variável da chave |
 | `OPENROUTER_URL` | endpoint de chat do OpenRouter | para onde as chamadas vão |

@@ -22,6 +22,7 @@ A chave nunca é gravada.
 | `--seed` | qualquer inteiro, ex.: `42`, `2026`.<br>Sem a flag vale `FARM_SEED` e depois o `SEED` de `farm/settings.py`; se nenhum definir, um número é sorteado e fica no nome da pasta da run | a do jogo (`2026`) | semente do cenário: mesma semente, mesmo estoque e mesmas promoções em cada dia ([SEMENTE.md](SEMENTE.md)) |
 | `--days` | inteiro ≥ 1, ex.: `3` (teste), `30` (um mês), `120` (o ano), `121` (o ano + 1 dia de primavera).<br>Cada dia é uma chamada ao modelo | 121 | quantos dias jogar; a partida acaba no fim desse dia |
 | `--model` | qualquer id do OpenRouter no formato `provedor/modelo`, ex.: `openai/gpt-5.6-luna`, `nvidia/nemotron-3.5-lightning:free` | `openai/gpt-5.6-luna` | o modelo que joga |
+| `--reasoning-effort` | `low`, `medium` ou `high`, nos modelos que listam `reasoning_effort` no OpenRouter.<br>Sem a flag o parâmetro não é enviado e vale o padrão do provedor | — (padrão do provedor) | quanto o modelo raciocina antes de responder: menos é mais rápido e mais barato. Vai para o `config.json`, o `LEIAME.md` e o nome da pasta (`..._deepseek-v4.1-flash_reasoning-low_principal_seed42`) |
 | `--mode` | `principal`: o bloco de conhecimento que o modelo escreve volta no prompt do dia seguinte.<br>`sem_memoria`: o conhecimento chega sempre vazio (o modelo continua escrevendo; só não recebe de volta) | `principal` | liga ou desliga a memória entre os dias |
 | `--knowledge` | caminho de um arquivo de texto UTF-8 que exista, ex.: `runs_llm/<pasta>/conhecimento_final.txt`.<br>Arquivo inexistente encerra o comando antes de começar | — (sem base) | base de conhecimento prévia, anexada só à chamada de estratégia |
 | `--timeout` | segundos, número > 0 (aceita decimais), ex.: `120`, `360`, `600`.<br>O OpenRouter costuma desistir sozinho por volta de 300 s, o que também conta como timeout | 360 | espera máxima por chamada; estourou, o jogador dorme sem agir e a chamada não é repetida |
@@ -104,7 +105,12 @@ na hora. Cada run guarda uma cópia dos templates que usou, em `prompts/` dentro
       └──────────────────────────────────────────────────────────┘
 ```
 
-Total: **N + 1 chamadas** para uma partida de N dias.
+Total: **N + 1 chamadas** para uma partida de N dias, fora as repetições.
+
+A chamada inicial é a única que insiste: ela repete até 10 vezes, inclusive quando estoura o prazo.
+Uma run sem estratégia joga os N dias sem âncora — já aconteceu três vezes —, então é melhor não
+começar. Se nenhuma tentativa servir, a run para aí; se alguma trouxe uma estratégia só longa
+demais, ela é usada cortada.
 
 ## Decisões de desenho
 
@@ -154,11 +160,13 @@ Dois blocos do prompt diário existem para o modelo não ser pego de surpresa:
 
 | Situação | O que acontece |
 | --- | --- |
-| Sem resposta em `--timeout` segundos | **não repete**: o jogador dorme e o feedback do dia seguinte diz |
+| Sem resposta em `--timeout` segundos, num dia | **não repete**: o jogador dorme e o feedback do dia seguinte diz |
 | Provedor desiste por tempo (HTTP 504/408) | igual ao timeout |
 | JSON inválido, 429, 5xx | tenta de novo, até `--attempts` |
 | Estratégia acima de 260 caracteres | rejeitada e pedida de novo; esgotadas as tentativas, usa a última cortada em bullets inteiros |
 | Tentativas esgotadas num dia | dia perdido: o jogador dorme sem agir |
+| Sem créditos (HTTP 402), ou chave recusada (401/403) | **a run para na hora**, porque nenhuma tentativa resolveria. O vídeo é fechado, os logs do jogo vão para `logs/`, e a pasta fica com `LEIAME.md`, os CSVs dos dias jogados e a linha no `resumo.csv`, com o motivo |
+| Chamada inicial (a da estratégia) | repete até `STRATEGY_MAX_ATTEMPTS` (10), **inclusive em timeout**; se nenhuma resposta servir, a run para antes de jogar o dia 1 |
 
 Enquanto espera o modelo, o jogo fica parado e o gravador pausado. Se a espera passar do prazo, a
 pilha de todas as threads vai para `travamentos.log`, dentro da pasta da run (o arquivo só existe
@@ -174,6 +182,7 @@ desliga). Para runs longas, `--headless` evita a janela, que o Windows poderia f
 | --- | --- | --- |
 | **Ctrl+C** no terminal, ou fechar a janela do jogo | completo até a parada | escritos, com a situação `interrompida` |
 | **À força**: Gerenciador de Tarefas, `taskkill /F`, fechar o terminal | abre até ~3 s antes da parada | não são escritos |
+| **A própria run para**: sem créditos, chave recusada, ou nenhuma estratégia em 10 tentativas | completo até a parada | escritos, com o motivo na situação |
 
 O vídeo sobrevive à parada à força porque o `video.mp4` é um MP4 fragmentado: o índice fica no
 começo e cada fragmento de 1 s vai para o disco assim que fecha. Um MP4 comum só escreve o índice no

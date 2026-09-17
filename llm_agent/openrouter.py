@@ -11,6 +11,7 @@ mensagem, nunca os cabecalhos.
 import json
 import logging
 import os
+import re
 import threading
 import time
 import urllib.error
@@ -25,7 +26,12 @@ from llm_agent import settings
 logger = logging.getLogger(__name__)
 
 OK, TIMEOUT, HTTP_ERROR, NETWORK_ERROR = "ok", "timeout", "erro_http", "erro_rede"
+# Erros que nenhuma tentativa resolve: a run para e salva o que tem.
+NO_CREDITS, AUTH_ERROR = "sem_creditos", "chave_recusada"
 RETRYABLE_HTTP = {409, 425, 429, 500, 502, 503}   # 408/504 sao timeout: nao repetem
+FATAL_HTTP = {401: AUTH_ERROR, 402: NO_CREDITS, 403: AUTH_ERROR}
+SEM_SALDO = re.compile(r"insufficient credits|more credits|insufficient balance|sem saldo",
+                       re.IGNORECASE)
 
 
 @dataclass
@@ -54,6 +60,11 @@ class CallResult:
             return True
         return self.status == HTTP_ERROR and self.http_status in RETRYABLE_HTTP
 
+    @property
+    def fatal(self) -> bool:
+        """Sem creditos ou chave recusada: repetir so gasta tempo."""
+        return self.status in (NO_CREDITS, AUTH_ERROR)
+
 
 def _provider_timeout(codigo: int | None, corpo: str) -> bool:
     """O provedor desistiu por tempo (o OpenRouter corta em ~300s com 504).
@@ -70,6 +81,17 @@ def _provider_timeout(codigo: int | None, corpo: str) -> bool:
     dados = dados.get("error", dados) if isinstance(dados, dict) else {}
     meta = dados.get("metadata") if isinstance(dados, dict) else None
     return isinstance(meta, dict) and meta.get("error_type") == "timeout"
+
+
+def fatal_status(codigo: int | None, corpo: str) -> str | None:
+    """O status fatal deste erro, se for um: sem creditos ou chave recusada.
+
+    Vale o codigo HTTP e tambem a mensagem: ha provedor que avisa do saldo com
+    outro codigo, e ai a run tambem nao tem como continuar.
+    """
+    if codigo in FATAL_HTTP:
+        return FATAL_HTTP[codigo]
+    return NO_CREDITS if corpo and SEM_SALDO.search(corpo) else None
 
 
 class MissingApiKey(RuntimeError):
@@ -193,7 +215,8 @@ class OpenRouterClient:
                 status = resp.status
         except urllib.error.HTTPError as erro:
             corpo = erro.read().decode("utf-8", errors="replace")
-            classe = TIMEOUT if _provider_timeout(erro.code, corpo) else HTTP_ERROR
+            classe = (fatal_status(erro.code, corpo)
+                      or (TIMEOUT if _provider_timeout(erro.code, corpo) else HTTP_ERROR))
             return CallResult(classe, time.monotonic() - inicio, http_status=erro.code,
                               error=corpo[:2000])
         except (urllib.error.URLError, TimeoutError, OSError) as erro:
@@ -212,7 +235,8 @@ class OpenRouterClient:
             codigo = erro.get("code") if isinstance(erro, dict) else None
             codigo = codigo if isinstance(codigo, int) else 502
             texto = json.dumps(erro, ensure_ascii=False)
-            classe = TIMEOUT if _provider_timeout(codigo, texto) else HTTP_ERROR
+            classe = (fatal_status(codigo, texto)
+                      or (TIMEOUT if _provider_timeout(codigo, texto) else HTTP_ERROR))
             return CallResult(classe, duracao, http_status=codigo, error=texto[:2000], raw=resposta)
 
         escolha = (resposta.get("choices") or [{}])[0]

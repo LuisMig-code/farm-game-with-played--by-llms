@@ -154,6 +154,7 @@ scripting/           a camada que joga por código e grava vídeo
 llm_agent/           o agente LLM: prompts, interpretador, logs
 prompts/             os dois prompts do agente, em .md
 examples/            dois scripts prontos usando a camada de scripting
+tests/               a suíte do agente, sem rede, e o conferidor de links
 docs/                a documentação
 Assets/              imagens do mapa, personagem, plantas e ícones
 ```

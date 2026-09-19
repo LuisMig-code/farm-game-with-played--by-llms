@@ -18,7 +18,7 @@ documentação em [docs/README.md](docs/README.md).
   acento. Classes e funções em inglês, variáveis locais em português — siga o arquivo ao redor.
 - **Commit e PR só quando o usuário pedir.**
 - **A chave** (`OPEN_ROUTER_API_KEY`, lida do ambiente ou do `.env`) nunca aparece em log, comando
-  ou saída. `.env`, `runs_llm/` e `logs/` ficam fora do git.
+  ou saída. `.env`, `runs_llm/`, `logs/` e `cenarios/` ficam fora do git.
 
 ## Onde fica cada coisa
 
@@ -33,18 +33,23 @@ documentação em [docs/README.md](docs/README.md).
 | `llm_agent/openrouter.py` | o cliente HTTP: prazo, repetição, erro fatal |
 | `llm_agent/run_logs.py`, `transactions.py` | a pasta da run, os CSVs e as transações lidas do jogo |
 | `llm_agent/settings.py` | configuração do agente: modelo, tetos, tentativas, velocidade, pastas |
+| `seed_scenarios/` | o simulador de cenários: estoque e promoção de cada dia de uma semente, sem abrir o jogo ([docs/CENARIOS.md](docs/CENARIOS.md)) |
 | `prompts/` | os dois prompts em `.md`, lidos a cada run |
 | `run_llm.py`, `main.py` | rodar um LLM; jogar no teclado |
-| `tests/` | a suíte sem rede e o conferidor de links ([tests/README.md](tests/README.md)) |
+| `simulate_seed.py`, `simulate_range.py` | o cenário de uma semente; o de um intervalo, em paralelo |
+| `tests/` | as suítes sem rede (agente e simulador) e o conferidor de links ([tests/README.md](tests/README.md)) |
 | `docs/`, `examples/` | a documentação; dois scripts prontos |
-| `runs_llm/`, `logs/` | saídas das runs e dos logs do jogo (fora do git) |
+| `runs_llm/`, `logs/`, `cenarios/` | saídas das runs, dos logs do jogo e do simulador (fora do git) |
 
 ## Comandos
 
 ```bash
 venv/Scripts/python.exe main.py --seed 42                     # jogar no teclado
 venv/Scripts/python.exe run_llm.py --days 121 --seed 42 --headless --model google/gemini-3.8-flash
-venv/Scripts/python.exe tests/check_llm.py                    # suíte, ~8 min, sem rede
+venv/Scripts/python.exe simulate_seed.py --seed 42            # cenário da loja de uma semente
+venv/Scripts/python.exe simulate_range.py --from 1 --to 1000  # um intervalo, em paralelo
+venv/Scripts/python.exe tests/check_llm.py                    # suíte do agente, ~8 min, sem rede
+venv/Scripts/python.exe tests/check_scenarios.py              # suíte do simulador, ~20 s
 venv/Scripts/python.exe tests/check_links.py                  # links e âncoras dos .md
 ```
 
@@ -54,8 +59,8 @@ Windows: `venv/Scripts/python.exe`, e caminhos curtos por causa do limite de 260
 
 ## Mexendo no agente
 
-Rode a suíte inteira depois de mudar `llm_agent/`, `scripting/` ou `prompts/`, e o
-`tests/check_links.py` depois de mexer em `.md`. O que costuma quebrar:
+Rode a suíte do agente inteira (`tests/check_llm.py`) depois de mudar `llm_agent/`, `scripting/` ou
+`prompts/`, e o `tests/check_links.py` depois de mexer em `.md`. O que costuma quebrar:
 
 - **Fato calculado ganha de nota escrita.** Número de regra (preço, prazo, custo, saturação) sai de
   `farm/settings.py` e de `CROPS`, calculado em `facts.py`; nunca escrito à mão no prompt. Exemplo
@@ -75,10 +80,25 @@ Rode a suíte inteira depois de mudar `llm_agent/`, `scripting/` ou `prompts/`, 
 - **Falhas:** dia sem resposta dorme sem repetir; a estratégia repete até 10 vezes e, sem ela, a run
   não começa; 402/401/403 param a run na hora, e o `_finish` salva vídeo, logs e resumo.
 
+## Mexendo no simulador de cenários
+
+Rode `tests/check_scenarios.py` depois de mudar `seed_scenarios/` ou os dois scripts.
+
+- **O sorteio é o do jogo.** O simulador cria o `Market` de `farm/market.py` e faz as mesmas chamadas
+  do `Game`: `Market(seed)` na largada e `new_day(dia)` a cada noite. Nunca reimplemente o sorteio.
+  O bloco 1 confere dia a dia contra uma partida de verdade.
+- **Colunas saem do jogo:** itens de `BUY_PRICES`, estações de `SEASONS`. A coluna `regras` é o
+  hash dos arquivos do sorteio em `farm/`; se ela muda, o que está em `cenarios/` é refeito.
+- **Pool no Windows:** cada processo reimporta o script principal, então `run_batch` com mais de um
+  processo só roda atrás de `if __name__ == "__main__"`. Por isso a suíte testa o paralelo por
+  subprocesso e nunca abre o pool dentro dela.
+
 ## Rodando experimentos
 
 - Cada run gasta crédito do OpenRouter e leva de ~20 min a ~4 h.
-- Comparações usam **semente 42** e 121 dias, salvo pedido diferente.
+- Comparações usam **semente 42** e 121 dias, salvo pedido diferente. A 42 é uma loja típica: 158
+  promoções contra a média de 160 das sementes 0–999, que vão de 128 a 197. Para escolher outros
+  cenários, use `simulate_range.py` e `cenarios/resumo.csv`.
 - Runs idênticas variam muito (`gpt-5.6-luna`: 904, 1858 e 2546 moedas). Uma run só não prova
   nada; compare também as métricas de mecanismo — saturação, dias parados, fertilizante, estoque.
 - Em paralelo, um processo por run (o `LOGS_DIR` do jogo é global), entrando com 30–60 s de

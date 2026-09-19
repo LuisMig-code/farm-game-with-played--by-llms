@@ -11,6 +11,7 @@ mais comuns e os cuidados que evitam quebrar alguma coisa.
 - [Cultivos: farm/crops.py](#cultivos-farmcropspy)
 - [Estações: farm/seasons.py](#estações-farmseasonspy)
 - [Agente LLM: llm_agent/settings.py](#agente-llm-llm_agentsettingspy)
+- [Simulador de cenários: seed_scenarios/settings.py](#simulador-de-cenários-seed_scenariossettingspy)
 - [Prompts: prompts/](#prompts-prompts)
 - [Receitas](#receitas)
 - [Cuidados](#cuidados)
@@ -27,6 +28,7 @@ mais comuns e os cuidados que evitam quebrar alguma coisa.
 | prazos, validade e preços dos cultivos, fertilizante | `farm/crops.py` |
 | janela, cores, painel | `farm/settings.py` |
 | modelo, timeout, dias, velocidade, pastas do agente | `llm_agent/settings.py` ou flags do `run_llm.py` |
+| pasta, dias e processos do simulador de cenários | `seed_scenarios/settings.py` ou flags do `simulate_seed.py` e do `simulate_range.py` |
 | o texto que o LLM recebe | `prompts/prompt_inicial.md` e `prompts/prompt_gaming.md` |
 | a chave do OpenRouter | `.env` na raiz |
 
@@ -69,11 +71,23 @@ arquivos `settings.py` são só valores, sem lógica: edite, salve e rode de nov
 | `scripted_run.py` | `--seed N`, `--no-video` |
 | `random_agent.py` | `--seed N`, `--days N` (padrão 15), `--no-video` |
 
+### `simulate_seed.py` e `simulate_range.py` — cenário da loja por semente
+
+| Parâmetro | Script | Padrão (em `seed_scenarios/settings.py`) | O que faz |
+| --- | --- | --- | --- |
+| `--seed N` | `simulate_seed.py` | `FARM_SEED`, depois `SEED` | a semente |
+| `--from A`, `--to B` | `simulate_range.py` | obrigatórios | a primeira e a última semente, inclusive; no máximo `MAX_SEEDS` = 100.000 |
+| `--days N` | os dois | `DAYS` = 121 | dias simulados, a partir do dia 1 |
+| `--workers N` | `simulate_range.py` | `WORKERS` = um por núcleo | quantos processos |
+| `--out PASTA` | os dois | `OUT_DIR` = `cenarios/` | a pasta de log |
+
+Ver [CENARIOS.md](CENARIOS.md).
+
 ## Variáveis de ambiente e .env
 
 | Variável | Onde vale | O que faz |
 | --- | --- | --- |
-| `FARM_SEED` | jogo, scripts, agente | semente, quando não há `--seed` (nome configurável em `SEED_ENV`) |
+| `FARM_SEED` | jogo, scripts, agente, `simulate_seed.py` | semente, quando não há `--seed` (nome configurável em `SEED_ENV`) |
 | `OPEN_ROUTER_API_KEY` | agente | chave do OpenRouter; lida do ambiente ou do `.env` |
 | `SDL_VIDEODRIVER=dummy` | jogo, scripts | roda sem janela; o `--headless` do `run_llm.py` já faz isso |
 
@@ -274,6 +288,19 @@ Tudo que tem flag no `run_llm.py` pode ser sobreposto na linha de comando.
 | `GAME_LOGS_PREFIX` | `"IA_{modelo}_"` | prefixo dessas cópias |
 | `PROMPT_STRATEGY` / `PROMPT_DAY` | `prompts/prompt_inicial.md` / `prompt_gaming.md` | templates usados |
 
+## Simulador de cenários: `seed_scenarios/settings.py`
+
+Tudo que tem flag no `simulate_seed.py` ou no `simulate_range.py` pode ser sobreposto na linha de
+comando.
+
+| Nome | Padrão | O que faz |
+| --- | --- | --- |
+| `OUT_DIR` | `cenarios/` | a pasta de log (`--out`) |
+| `DAYS` | o `DAYS` do agente, 121 | dias simulados (`--days`); acompanha o horizonte das runs |
+| `WORKERS` | `None` | processos do `simulate_range.py`; `None` = um por núcleo (`--workers`) |
+| `CHUNK_SEEDS` | 50 | sementes por tarefa mandada a um processo |
+| `MAX_SEEDS` | 100.000 | teto de sementes por execução do `simulate_range.py`; cada uma grava ~11 KB |
+
 ## Prompts: `prompts/`
 
 Os dois prompts do agente são Markdown lidos a cada run — editar o arquivo muda a próxima partida sem
@@ -363,10 +390,21 @@ Mesmo `--seed`, mesmo `--days`, mesmos `settings.py` e mesmos prompts. A velocid
 no resultado. O `config.json` de cada run guarda os parâmetros do agente e a cópia dos prompts, mas
 **não** os valores de `farm/settings.py`: se mudar regras do jogo, anote.
 
+**Escolher sementes para um teste**
+
+```bash
+venv/Scripts/python.exe simulate_range.py --from 1 --to 1000
+```
+
+O fim da saída mostra a média de promoções e as sementes com menos e com mais. As métricas de cada
+semente ficam em `cenarios/resumo.csv`. Ver [CENARIOS.md](CENARIOS.md).
+
 ## Cuidados
 
 - **A semente não cobre as regras.** Ela só fixa o sorteio de estoque e promoções. Duas partidas com
-  a mesma semente e `settings.py` diferentes não são comparáveis.
+  a mesma semente e `settings.py` diferentes não são comparáveis. O simulador de cenários percebe a
+  mudança pela coluna `regras` e simula as sementes de novo
+  ([CENARIOS.md](CENARIOS.md#quando-uma-semente-é-simulada-de-novo)).
 - **Mapa acoplado.** Mudar `PLANTABLE_AREAS`, `WALKABLE_AREAS` ou `PLAYER_START_CELL` exige ajustar
   junto:
   - `scripting/session.py`: `SHOP = (21, 12)` e `HOUSE` (que é o `PLAYER_START_CELL`);

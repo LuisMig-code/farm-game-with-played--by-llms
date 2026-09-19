@@ -52,6 +52,18 @@ Reiniciar com `R` **também** repete o cenário: a semente é resolvida uma vez,
 vale para todas as partidas daquela janela — inclusive quando ela foi sorteada. Cada `R` continua
 gerando um par de arquivos novo, com um `id` diferente.
 
+## Ver o cenário antes de jogar
+
+Como o sorteio só depende da semente e do dia, dá para calcular o cenário inteiro sem abrir o jogo:
+
+```bash
+venv/Scripts/python.exe simulate_seed.py --seed 42
+```
+
+O comando grava em `cenarios/sementes/semente_42.csv` o estoque e as promoções de cada um dos 121
+dias. Para comparar muitas sementes de uma vez e ver qual tem mais promoções e qual tem menos, use o
+`simulate_range.py`. Ver [CENARIOS.md](CENARIOS.md).
+
 ## Como funciona
 
 Em [`farm/rng.py`](../farm/rng.py), duas funções:

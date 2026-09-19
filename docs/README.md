@@ -6,6 +6,7 @@ Por onde começar:
 - **Quero mudar alguma regra ou parâmetro** → [CONFIGURACOES.md](CONFIGURACOES.md)
 - **Quero um LLM jogando** → [AGENTE_LLM.md](AGENTE_LLM.md)
 - **Quero escrever um script que joga** → [SCRIPTING.md](SCRIPTING.md)
+- **Quero escolher sementes para testar** → [CENARIOS.md](CENARIOS.md)
 
 ## O jogo
 
@@ -18,6 +19,7 @@ Por onde começar:
 | [ESTACOES.md](ESTACOES.md) | o ano e o que cada estação muda |
 | [CONTROLS.md](CONTROLS.md) | teclas, mapa, zonas e personagem |
 | [SEMENTE.md](SEMENTE.md) | a semente que repete o cenário |
+| [CENARIOS.md](CENARIOS.md) | o estoque e as promoções de cada dia de uma semente, simulados sem jogar |
 | [LOGS.md](LOGS.md) | os arquivos que cada partida grava |
 
 ## Configuração

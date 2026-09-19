@@ -64,6 +64,9 @@ menu de compra (`Semente de Batata   4 moedas   12 no estoque`), e item zerado v
 `esgotado hoje`, desabilitado. O quadro de preços continua só com preços — os seis números de
 estoque não caberiam nas células sem virar sopa.
 
+O estoque e as promoções de cada dia de uma semente também podem ser vistos sem jogar, com o
+simulador de cenários: [CENARIOS.md](CENARIOS.md).
+
 ### Caixa diário da loja
 
 A loja tem **200 moedas por dia** para pagar por colheita — **300 no inverno**, onde os preços são multiplicados (ver [ESTACOES.md](ESTACOES.md)). Cada venda desconta o preço pago desse

@@ -24,3 +24,6 @@ docs/Todo_Implementations.md
 
 # Runs dos agentes LLM (prompts, respostas, videos)
 runs_llm/
+
+# Cenarios simulados por semente (simulate_seed.py, simulate_range.py)
+cenarios/

@@ -119,6 +119,20 @@ venv/Scripts/python.exe run_llm.py --seed 42 --days 30 --headless
 
 A lista completa e o funcionamento do agente estão em [docs/AGENTE_LLM.md](docs/AGENTE_LLM.md).
 
+## Cenários por semente
+
+A semente fixa o estoque e as promoções de cada dia, e dá para ver esse cenário sem jogar. O
+simulador usa o próprio `Market` do jogo:
+
+```bash
+venv/Scripts/python.exe simulate_seed.py --seed 42              # uma semente, dia a dia
+venv/Scripts/python.exe simulate_range.py --from 1 --to 1000    # um intervalo, em paralelo
+```
+
+O segundo script pula as sementes que já estão no log. No fim, mostra a média de promoções e as
+sementes com menos e com mais, o que ajuda a escolher cenários de teste. Ver
+[docs/CENARIOS.md](docs/CENARIOS.md).
+
 ## Configurações
 
 Tudo que dá para ajustar mora em arquivos de configuração, sem precisar mexer na lógica:
@@ -129,6 +143,7 @@ Tudo que dá para ajustar mora em arquivos de configuração, sem precisar mexer
 | [`farm/crops.py`](farm/crops.py) | cultivos: prazos, validade, preços, estoque, fertilizante |
 | [`farm/seasons.py`](farm/seasons.py) | o que cada estação muda |
 | [`llm_agent/settings.py`](llm_agent/settings.py) | o agente LLM: modelo, timeout, dias, velocidade, pastas |
+| [`seed_scenarios/settings.py`](seed_scenarios/settings.py) | o simulador de cenários: pasta, dias, processos |
 | [`prompts/`](prompts) | os prompts do LLM, em Markdown, lidos a cada run |
 | `.env` | a chave do OpenRouter |
 
@@ -141,20 +156,25 @@ O que cada valor faz, os limites e receitas de ajuste estão em
 | --- | --- |
 | `logs/` | partidas no teclado e por script: `run_<id>_semente<N>_<data>.log` e `.csv`, com cada ação. Cópias das runs LLM entram com o prefixo `IA_<modelo>_` |
 | `runs_llm/` | uma pasta por run de LLM: prompts, respostas, CSVs por dia, preços, transações, vídeo e um `LEIAME.md` com o resumo |
+| `cenarios/` | o simulador de cenários: um CSV por semente com um dia por linha, `resumo.csv` com uma linha por semente e `execucoes.csv` |
 
-Ver [docs/LOGS.md](docs/LOGS.md) e a seção "Pastas" de [docs/AGENTE_LLM.md](docs/AGENTE_LLM.md).
+Ver [docs/LOGS.md](docs/LOGS.md), a seção "Pastas" de [docs/AGENTE_LLM.md](docs/AGENTE_LLM.md) e
+[docs/CENARIOS.md](docs/CENARIOS.md).
 
 ## Estrutura do projeto
 
 ```
 main.py              abre o jogo no teclado
 run_llm.py           roda uma partida jogada por um LLM
+simulate_seed.py     o cenário da loja de uma semente, sem abrir o jogo
+simulate_range.py    o mesmo para um intervalo de sementes, em paralelo
 farm/                o jogo (regras, mapa, loja, estações, desenho)
 scripting/           a camada que joga por código e grava vídeo
 llm_agent/           o agente LLM: prompts, interpretador, logs
+seed_scenarios/      o simulador de cenários: simulação, métricas e a pasta cenarios/
 prompts/             os dois prompts do agente, em .md
 examples/            dois scripts prontos usando a camada de scripting
-tests/               a suíte do agente, sem rede, e o conferidor de links
+tests/               as suítes sem rede (agente e simulador) e o conferidor de links
 docs/                a documentação
 Assets/              imagens do mapa, personagem, plantas e ícones
 ```
@@ -171,6 +191,7 @@ Assets/              imagens do mapa, personagem, plantas e ícones
 | [ESTACOES.md](docs/ESTACOES.md) | o ano e o que cada estação muda |
 | [CONTROLS.md](docs/CONTROLS.md) | teclas, mapa, zonas, personagem |
 | [SEMENTE.md](docs/SEMENTE.md) | a semente que repete o cenário |
+| [CENARIOS.md](docs/CENARIOS.md) | o cenário da loja de cada semente, simulado sem jogar |
 | [LOGS.md](docs/LOGS.md) | os arquivos de cada partida |
 | [SCRIPTING.md](docs/SCRIPTING.md) | jogar por código |
 | [AGENTE_LLM.md](docs/AGENTE_LLM.md) | o agente LLM, flags, pastas das runs |
